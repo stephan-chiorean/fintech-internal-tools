@@ -6,7 +6,7 @@ A prototype that rebuilds a fintech client's Microsoft Power Apps internal tools
 
 The client runs three internal tools on Power Apps (a KYC review queue, a refunds dashboard and a feature-flag admin panel) and plans 10+ more. This repo shows they can all run as modules in one application, sharing permissions, customer data, an action pipeline, approvals, audit and a common shell.
 
-**Status:** the shared foundation and shell are built, including tool-owned records with history, seeds and decision guardrails for the planned tools. No real tools yet; a test-only harness tool exercises the pipeline. The database is created and seeded with fake data at `.data/app.db` on first run (delete it to reset). A database from an older schema version is moved aside automatically and recreated.
+**Status:** the shared foundation and shell are built, including tool-owned records with history, seeds and decision guardrails for the planned tools. The Feature Flags tool is built; a test-only harness tool exercises the pipeline. The database is created and seeded with fake data at `.data/app.db` on first run (delete it to reset). A database from an older schema version is moved aside automatically and recreated.
 
 ## How to run it
 
@@ -33,6 +33,7 @@ Switch users with the picker in the header (mock sign-in, no passwords).
 - **Pipeline:** as Jordan, post a $50 test adjustment on Dana's page (runs directly), then $200 (creates an approval). As Alex, any adjustment is denied with the reason shown.
 - **Approvals:** as Taylor (Tier 2, approves up to $500), approve Jordan's request on Approvals. Try approving your own request as Taylor, or approving as Alex: both are blocked by guardrails.
 - **Audit:** as Morgan (compliance), open Audit log to see one row per action, approval decision and denial. The table can't be updated or deleted.
+- **Feature flags:** as Priya, open Feature flags and turn off `payments.instant-payouts` in staging (applies at once), then turn it on in prod (creates an approval). The cards flag is hidden from her. As Marcus, approve it from the dashboard card; a prod change Marcus requests himself is blocked from his own approval. Each flag's history lists every change, request and refused attempt, with rollback buttons that follow the same rules.
 - **Explanations:** the dashboard lists each signed-in user's grants and where they come from (direct or inherited through the team tree).
 
 ## What Power Apps capability each part replaces
@@ -45,7 +46,7 @@ Switch users with the picker in the header (mock sign-in, no passwords).
 | Action pipeline | Direct writes and Power Automate flows set up per app | Built |
 | Approvals | Power Automate approval flows | Built |
 | Audit log | Per-app or table-level auditing | Built |
-| Tool modules (`src/tools/`) | Individual canvas or model-driven apps | Test harness only |
+| Tool modules (`src/tools/`) | Individual canvas or model-driven apps | Feature flags built; KYC queue and refunds next |
 
 ## How the foundation works
 
@@ -81,7 +82,7 @@ How a tool plugs in is documented in `AGENTS.md` ("Building a tool"). ESLint blo
 ## Results
 
 - Foundation and shell: `npm test`, `npm run typecheck` and `npm run lint` pass. Tests cover team inheritance, all-teams grants, scope, conditions (including on the acting user), guardrails, decision explanations and failed limits, masking, cross-tool facts, tool records (trusted attributes can't be set from input, history and request lifecycle, reads scoped by kind and status), seeds, KYC status updates, approval recheck and single use, audit and history immutability, and end-to-end checks that call the shell's server actions directly.
-- No real tools built yet.
+- Feature flags (`src/tools/feature-flags/`): tests cover staging toggles applying at once, prod toggles and rollbacks waiting for payments on-call approval, no self-approval, product-area scope (Priya can't touch cards flags), complete history, and the five end-to-end security checks through the shell's server actions.
 
 ## What's mocked and what production would need
 
