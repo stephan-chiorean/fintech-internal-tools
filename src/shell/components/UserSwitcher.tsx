@@ -11,7 +11,8 @@ interface Option {
 export function UserSwitcher({ users, currentUserId }: { users: Option[]; currentUserId: string | null }) {
   return (
     <div className={styles.switcher}>
-      <form action={signIn}>
+      {/* Remount on user change: React resets a form after its action, which would restore a stale selection. */}
+      <form key={currentUserId ?? ""} action={signIn}>
         <label className={styles.switcherLabel}>
           Signed in as
           <select
