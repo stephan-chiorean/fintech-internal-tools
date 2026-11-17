@@ -31,12 +31,10 @@ function FlagCard({ viewerId, flag, pending }: { viewerId: string; flag: ToolRec
         <summary>History</summary>
         <ul className={styles.list}>
           {entries.map((entry) => {
+            const isChange = entry.event === "created" || entry.event === "updated";
             const canRollBack =
-              (entry.event === "created" || entry.event === "updated") &&
-              entry.version < flag.version &&
-              entry.attrs.enabled !== enabled &&
-              !versions.has(entry.version);
-            versions.add(entry.version);
+              isChange && entry.version < flag.version && entry.attrs.enabled !== enabled && !versions.has(entry.version);
+            if (isChange) versions.add(entry.version);
             return (
               <li key={entry.id}>
                 <EffectBadge effect={entry.event} /> v{entry.version} · {entry.attrs.enabled ? "on" : "off"} · by {entry.actorId}
