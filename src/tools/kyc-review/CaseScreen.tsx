@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getCustomerProfile, getRecordHistory } from "@/foundation/data";
+import { HistoryTimeline } from "@/shell/components/HistoryTimeline";
 import { EffectBadge, Reasons } from "@/shell/components/Reasons";
 import styles from "@/shell/shell.module.css";
 import { CaseActionForm } from "./CaseActionForm";
@@ -119,36 +120,7 @@ export function CaseScreen({ viewerId, caseKey }: { viewerId: string; caseKey: s
 
       <section className={styles.card}>
         <h2 className={styles.cardTitle}>History</h2>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Event</th>
-              <th>Who</th>
-              <th>Action</th>
-              <th>Status after</th>
-              <th>Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.id}>
-                <td>{new Date(entry.at).toLocaleString()}</td>
-                <td>
-                  <EffectBadge effect={entry.event} />
-                </td>
-                <td>{entry.actorId}</td>
-                <td>
-                  {entry.actionId} <span className={styles.muted}>(audit #{entry.auditId})</span>
-                </td>
-                <td>{String(entry.attrs.status ?? "")}</td>
-                <td>
-                  <Reasons reasons={entry.reasons} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <HistoryTimeline entries={entries} />
       </section>
     </div>
   );
