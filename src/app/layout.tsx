@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
+import { ShellFrame } from "@/shell/components/ShellFrame";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,7 +12,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <Suspense fallback={<p style={{ padding: 24 }}>Loading…</p>}>
+          <ShellFrame>{children}</ShellFrame>
+        </Suspense>
+      </body>
     </html>
   );
 }
