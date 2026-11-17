@@ -34,6 +34,12 @@ export const policy = definePolicy({
     "test-harness.case.claim": { description: "Claim an open test case (test harness only)" },
     "test-harness.case.decide": { description: "Decide a claimed test case (test harness only)", isDecision: true },
     "test-harness.kyc.set": { description: "Set a customer's KYC status (test harness only)" },
+    "kyc-review.case.read": { description: "See KYC cases and their history" },
+    "kyc-review.case.open": { description: "Open a KYC case for a customer" },
+    "kyc-review.case.claim": { description: "Claim a pending KYC case" },
+    "kyc-review.case.decide": { description: "Approve or reject a claimed KYC case", isDecision: true },
+    "kyc-review.case.escalate": { description: "Escalate a claimed KYC case" },
+    "kyc-review.case.decide-escalated": { description: "Approve or reject an escalated KYC case", isDecision: true },
   },
 
   roles: {
@@ -87,7 +93,7 @@ export const policy = definePolicy({
       ],
     },
     "kyc-reviewer": {
-      description: "Review customer identity checks",
+      description: "Review customer identity checks: claim pending KYC cases, then approve, reject or escalate the ones you claimed",
       permissions: [
         { permission: "customer.read" },
         { permission: "customer.ssn.last4" },
@@ -96,6 +102,17 @@ export const policy = definePolicy({
         { permission: "customer.address.full" },
         { permission: "facts.read" },
         { permission: "customer.kycStatus.update" },
+        { permission: "kyc-review.case.read" },
+        { permission: "kyc-review.case.open" },
+        { permission: "kyc-review.case.claim", when: { attr: "status", op: "eq", value: "pending" } },
+        {
+          permission: "kyc-review.case.decide",
+          when: { all: [{ attr: "status", op: "eq", value: "claimed" }, { attr: "claimedBy", op: "eq", actor: "id" }] },
+        },
+        {
+          permission: "kyc-review.case.escalate",
+          when: { all: [{ attr: "status", op: "eq", value: "claimed" }, { attr: "claimedBy", op: "eq", actor: "id" }] },
+        },
       ],
     },
     "compliance-auditor": {
@@ -123,6 +140,20 @@ export const policy = definePolicy({
         { permission: "customer.dob.full" },
         { permission: "customer.address.full" },
       ],
+    },
+    "kyc-escalation-decider": {
+      description: "Decide escalated KYC cases someone else claimed",
+      permissions: [
+        { permission: "kyc-review.case.read" },
+        {
+          permission: "kyc-review.case.decide-escalated",
+          when: { all: [{ attr: "status", op: "eq", value: "escalated" }, { attr: "claimedBy", op: "neq", actor: "id" }] },
+        },
+      ],
+    },
+    "kyc-case-opener": {
+      description: "Flag a customer for KYC review",
+      permissions: [{ permission: "kyc-review.case.open" }],
     },
     // Test-harness case roles. The policy grants none of them; tests add grants (see test-harness/records.test.ts).
     "test-harness-case-worker": {
@@ -167,6 +198,8 @@ export const policy = definePolicy({
     { id: "kyc-review-reviewers", to: { team: "kyc-review" }, role: "kyc-reviewer", description: "KYC reviewers check identities" },
     { id: "compliance-auditors", to: { team: "compliance" }, role: "compliance-auditor", description: "Compliance audits all activity" },
     { id: "fraud-analysts", to: { team: "fraud" }, role: "fraud-analyst", description: "Fraud investigates risky customers" },
+    { id: "kyc-escalation-deciders", to: { allTeams: ["compliance", "kyc-review"] }, role: "kyc-escalation-decider", description: "People in both compliance and KYC review decide escalated KYC cases" },
+    { id: "fraud-kyc-openers", to: { team: "fraud" }, role: "kyc-case-opener", description: "Fraud can flag customers for KYC review" },
     { id: "jamie-case-cust-1004", to: { user: "jamie" }, role: "pii-investigator", scope: { customerId: "cust_1004" }, description: "Jamie's open fraud case on Sam Okafor" },
   ],
 
