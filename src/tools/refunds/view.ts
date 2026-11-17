@@ -42,13 +42,11 @@ function toView(viewerId: string, record: ToolRecord): RefundView {
 }
 
 /** A customer's refunds the viewer may read, newest first. */
-export function customerRefunds(viewerId: string, customerId: string): { refunds: RefundView[]; withheld: number } {
-  const { records, withheld } = listToolRecords(viewerId, REFUNDS_TOOL, { kind: REFUND_KIND });
-  const refunds = records
+export function customerRefunds(viewerId: string, customerId: string): RefundView[] {
+  return listToolRecords(viewerId, REFUNDS_TOOL, { kind: REFUND_KIND }).records
     .filter((r) => r.customerId === customerId)
     .map((r) => toView(viewerId, r))
     .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
-  return { refunds, withheld: withheld.count };
 }
 
 /** Pending refund approvals the viewer could approve right now. */

@@ -44,7 +44,7 @@ export function RefundsDashboardCard({ viewerId }: DashboardSlotProps) {
 }
 
 export function CustomerRefunds({ viewerId, customerId }: CustomerSlotProps) {
-  const { refunds, withheld } = customerRefunds(viewerId, customerId);
+  const refunds = customerRefunds(viewerId, customerId);
   const approvals = refundApprovalsById(viewerId);
   const decide = (r: RefundView) => {
     if (r.state === "pending-approval" && r.pendingApprovalId) {
@@ -74,7 +74,6 @@ export function CustomerRefunds({ viewerId, customerId }: CustomerSlotProps) {
         ]}
         expand={history}
       />
-      {withheld > 0 && <p className={styles.muted}>{withheld} refund(s) you can&apos;t view are not shown.</p>}
       <h4>Request a refund</h4>
       <RequestRefundForm customerId={customerId} />
     </div>
