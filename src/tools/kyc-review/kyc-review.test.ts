@@ -41,12 +41,15 @@ describe("KYC review", () => {
     db = freshDb();
   });
 
-  it("seeds pending cases through the pipeline as the system", () => {
+  it("seeds pending cases through the pipeline, one opened by Jamie", () => {
     const { records } = listToolRecords("riley", TOOL, { kind: CASE, status: "pending" });
-    expect(records.map((r) => r.key).sort()).toEqual(SEED_CASES.map((c) => c.key).sort());
-    expect(records.every((r) => r.openedBy === "system")).toBe(true);
-    expect(db.prepare("SELECT outcome, actor_id AS actor FROM audit WHERE tool = 'kyc-review'").all()).toEqual(
-      SEED_CASES.map(() => ({ outcome: "seeded", actor: "system" })),
+    expect(Object.fromEntries(records.map((r) => [r.key, r.openedBy]))).toEqual({
+      "kyc-1001": "system",
+      "kyc-1002": "jamie",
+      "kyc-1003": "system",
+    });
+    expect(db.prepare("SELECT outcome, actor_id AS actor FROM audit WHERE tool = 'kyc-review' ORDER BY id").all()).toEqual(
+      SEED_CASES.map((c) => ({ outcome: "seeded", actor: c.as ?? "system" })),
     );
   });
 
@@ -127,6 +130,16 @@ describe("KYC review", () => {
     expect(decideEscalated("avery", "kyc-1003", "approve").outcome).toBe("denied");
   });
 
+  it("Jamie can't decide the case the seed opened as Jamie", () => {
+    withExtraGrants(db, JAMIE_AS_REVIEWER);
+    expect(claim("jamie", "kyc-1002").outcome).toBe("executed");
+    const result = decide("jamie", "kyc-1002", "approve");
+    expect(result.outcome).toBe("denied");
+    expect(result.reasons[0]).toContain("no-deciding-own-record");
+    expect(escalate("jamie", "kyc-1002").outcome).toBe("executed");
+    expect(decideEscalated("avery", "kyc-1002", "approve").outcome).toBe("executed");
+  });
+
   it("Jamie can't decide the case Jamie opened", () => {
     expect(open("jamie", "kyc-jamie", "cust_1004").outcome).toBe("executed");
     expect(stored("kyc-jamie").openedBy).toBe("jamie");
@@ -184,7 +197,7 @@ describe("KYC review", () => {
     const history = getRecordHistory("riley", TOOL, ref("kyc-1002"));
     if (!history.ok) throw new Error(history.decision.reasons[0]);
     expect(history.entries.map((e) => [e.event, e.actorId, e.actionId, e.attrs.status])).toEqual([
-      ["created", "system", "kyc-review.open-case", "pending"],
+      ["created", "jamie", "kyc-review.open-case", "pending"],
       ["updated", "riley", "kyc-review.claim-case", "claimed"],
       ["denied", "avery", "kyc-review.claim-case", "claimed"],
       ["updated", "riley", "kyc-review.escalate-case", "escalated"],

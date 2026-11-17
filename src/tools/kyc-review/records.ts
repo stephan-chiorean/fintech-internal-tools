@@ -174,16 +174,16 @@ defineAction({
   execute: decide,
 });
 
-// Opened by the system seed for now; the cust_1004 case moves to Jamie once seeds can act as a user.
+// Jamie (fraud) opens the cust_1004 case through her own permission checks; the system opens the rest.
 export const SEED_CASES = [
   { key: "kyc-1001", customerId: "cust_1002", note: "New cards customer: identity check pending" },
-  { key: "kyc-1002", customerId: "cust_1004", note: "Fraud flagged a mismatch between ID and address on file" },
+  { key: "kyc-1002", customerId: "cust_1004", note: "Fraud flagged a mismatch between ID and address on file", as: "jamie" },
   { key: "kyc-1003", customerId: "cust_1006", note: "Customer reapplied after a rejected identity check" },
 ];
 
 defineSeed({
   id: "kyc-review.pending-cases",
   tool: TOOL,
-  description: "Opens a few pending KYC cases",
-  steps: SEED_CASES.map((input) => ({ actionId: "kyc-review.open-case", input })),
+  description: "Opens a few pending KYC cases, one by Jamie",
+  steps: SEED_CASES.map(({ as, ...input }) => ({ actionId: "kyc-review.open-case", input, as })),
 });
