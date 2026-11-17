@@ -1,6 +1,7 @@
 import { registerTool } from "@/shell/extensions";
 import styles from "@/shell/shell.module.css";
 import "./action";
+import "./records";
 import { HarnessForm } from "./HarnessForm";
 
 registerTool({

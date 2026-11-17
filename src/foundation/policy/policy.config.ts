@@ -15,6 +15,7 @@ export const policy = definePolicy({
     "customer.address.full": { description: "See a customer's address" },
     "facts.read": { description: "Read facts other tools published about a customer" },
     "audit.read": { description: "Read the audit log" },
+    "customer.kycStatus.update": { description: "Change a customer's KYC status (checked by the pipeline when an action sets it)" },
     "test-harness.adjust": {
       description: "Post a test balance adjustment (test harness only)",
       approvalPermission: "test-harness.adjust.approve",
@@ -23,6 +24,16 @@ export const policy = definePolicy({
       description: "Approve a test balance adjustment (test harness only)",
       isApproval: true,
     },
+    "test-harness.case.read": { description: "Read test cases and their history (test harness only)" },
+    "test-harness.case.open": { description: "Open a test case (test harness only)" },
+    "test-harness.case.update": {
+      description: "Change a test case (test harness only)",
+      approvalPermission: "test-harness.case.update.approve",
+    },
+    "test-harness.case.update.approve": { description: "Approve a test case change (test harness only)", isApproval: true },
+    "test-harness.case.claim": { description: "Claim an open test case (test harness only)" },
+    "test-harness.case.decide": { description: "Decide a claimed test case (test harness only)", isDecision: true },
+    "test-harness.kyc.set": { description: "Set a customer's KYC status (test harness only)" },
   },
 
   roles: {
@@ -84,6 +95,7 @@ export const policy = definePolicy({
         { permission: "customer.dob.full" },
         { permission: "customer.address.full" },
         { permission: "facts.read" },
+        { permission: "customer.kycStatus.update" },
       ],
     },
     "compliance-auditor": {
@@ -111,6 +123,37 @@ export const policy = definePolicy({
         { permission: "customer.dob.full" },
         { permission: "customer.address.full" },
       ],
+    },
+    // Test-harness case roles. The policy grants none of them; tests add grants (see test-harness/records.test.ts).
+    "test-harness-case-worker": {
+      description: "Work test cases (test harness only)",
+      permissions: [
+        { permission: "test-harness.case.read", when: { attr: "status", op: "in", value: ["open", "claimed"] } },
+        { permission: "test-harness.case.open" },
+        { permission: "test-harness.case.update", when: { attr: "env", op: "eq", value: "staging" } },
+        { permission: "test-harness.case.update", effect: "approval-required", when: { attr: "env", op: "eq", value: "prod" } },
+        { permission: "test-harness.case.claim", when: { attr: "status", op: "eq", value: "open" } },
+        {
+          permission: "test-harness.case.decide",
+          when: { all: [{ attr: "status", op: "eq", value: "claimed" }, { attr: "claimedBy", op: "eq", actor: "id" }] },
+        },
+      ],
+    },
+    "test-harness-case-approver": {
+      description: "Approve test case changes up to a limit (test harness only)",
+      params: { maxAmountCents: "number" },
+      permissions: [
+        { permission: "test-harness.case.read" },
+        { permission: "test-harness.case.update.approve", when: { attr: "amountCents", op: "lte", param: "maxAmountCents" } },
+      ],
+    },
+    "test-harness-case-auditor": {
+      description: "Read every test case in any status (test harness only)",
+      permissions: [{ permission: "test-harness.case.read", when: { attr: "recordKind", op: "eq", value: "case" } }],
+    },
+    "test-harness-kyc-setter": {
+      description: "Set KYC status through the test harness (test harness only)",
+      permissions: [{ permission: "test-harness.kyc.set" }],
     },
   },
 
@@ -158,6 +201,12 @@ export const policy = definePolicy({
       description: "Contractors can never approve requests.",
       appliesTo: "approval-permissions",
       rule: { kind: "actor-attribute", attribute: "isContractor", equals: true },
+    },
+    {
+      id: "no-deciding-own-record",
+      description: "Nobody can decide a record they opened or requested.",
+      appliesTo: "decision-permissions",
+      rule: { kind: "actor-matches-attribute", attributes: ["openedBy", "requestedBy"] },
     },
   ],
 });

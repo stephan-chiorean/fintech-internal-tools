@@ -1,16 +1,18 @@
 import { createApprovalRequest } from "@/foundation/approvals/requests";
 import { appendAudit } from "@/foundation/audit/log";
+import { appendHistory, type ToolRecord } from "@/foundation/data/records";
 import { getDb } from "@/foundation/db";
 import { loadActor } from "@/foundation/permissions/grants";
 import { checkPermission } from "@/foundation/permissions/resolver";
 import { getActivePolicy } from "@/foundation/policy/active";
-import { buildResource, errorMessage, executeWithAudit } from "./execute";
+import { buildResource, errorMessage, executeWithAudit, targetRecord } from "./execute";
 import { getAction } from "./registry";
 import type { ActionResult } from "./types";
 
 /**
  * The single server-side entry point for every write. Resolves the call to
- * execute, request-approval or deny, and always writes exactly one audit row.
+ * execute, request-approval or deny, and always writes exactly one audit row
+ * (plus history entries on the record it targets).
  */
 export function runAction(actorId: string, actionId: string, rawInput: unknown): ActionResult {
   const db = getDb();
@@ -19,18 +21,23 @@ export function runAction(actorId: string, actionId: string, rawInput: unknown):
 
   let input: unknown = rawInput;
   let customerId: string | null = null;
+  let record: ToolRecord | null = null;
   const deny = (reasons: string[]): ActionResult => ({
     outcome: "denied",
     reasons,
-    auditId: appendAudit(db, {
-      actorId,
-      actionId,
-      tool: def?.tool ?? "unknown",
-      outcome: "denied",
-      customerId,
-      input,
-      reasons,
-    }),
+    auditId: db.transaction(() => {
+      const auditId = appendAudit(db, {
+        actorId,
+        actionId,
+        tool: def?.tool ?? "unknown",
+        outcome: "denied",
+        customerId: customerId ?? record?.customerId,
+        input,
+        reasons,
+      });
+      if (record) appendHistory(db, { record, event: "denied", actorId, actionId, auditId, reasons });
+      return auditId;
+    })(),
   });
 
   if (!def) return deny([`Denied: unknown action "${actionId}".`]);
@@ -39,9 +46,10 @@ export function runAction(actorId: string, actionId: string, rawInput: unknown):
   } catch (error) {
     return deny([`Denied: invalid input: ${errorMessage(error)}`]);
   }
+  record = targetRecord(db, def, input);
   const actor = loadActor(db, actorId);
   if (!actor) return deny([`Denied: unknown user "${actorId}".`]);
-  const built = buildResource(db, def, input);
+  const built = buildResource(db, def, input, {}, actorId);
   if (!built.ok) return deny([`Denied: ${built.reason}.`]);
   customerId = built.customerId;
 
@@ -72,6 +80,17 @@ export function runAction(actorId: string, actionId: string, rawInput: unknown):
         input,
         reasons: decision.reasons,
       });
+      if (built.record) {
+        appendHistory(db, {
+          record: built.record,
+          event: "approval-requested",
+          actorId,
+          actionId: def.id,
+          approvalId: id,
+          auditId: audit,
+          reasons: decision.reasons,
+        });
+      }
       return { approvalId: id, auditId: audit };
     })();
     return { outcome: "approval-requested", approvalId, auditId, reasons: decision.reasons };
@@ -81,7 +100,7 @@ export function runAction(actorId: string, actionId: string, rawInput: unknown):
     def,
     actor,
     input,
-    customerId,
+    built,
     approvalId: null,
     outcome: "executed",
     reasons: decision.reasons,

@@ -3,10 +3,11 @@ import { getDb } from "@/foundation/db";
 import { customerResource, loadCustomer } from "@/foundation/data/customers";
 import { policy } from "@/foundation/policy/policy.config";
 import type { Policy } from "@/foundation/policy/types";
+import { syncGrants } from "@/foundation/policy/sync";
 import { validatePolicy } from "@/foundation/policy/validate";
 import { freshDb, withExtraGrants } from "@/foundation/testing";
-import { check, getEffectiveGrants } from "./index";
-import type { Resource } from "./resolver";
+import { check, describeSource, getEffectiveGrants } from "./index";
+import { type Resource, checkPermission } from "./resolver";
 
 const customer = (id: string, attrs: Resource["attrs"] = {}) => customerResource(loadCustomer(getDb(), id)!, attrs);
 
@@ -152,6 +153,13 @@ describe("permission resolver", () => {
       expect(decision.reasons.join("\n")).toContain("amountCents 20000 ≤ 10000 is false");
     });
 
+    it("names the failed limit in denial headlines", () => {
+      const decision = check({ actorId: "jordan", permission: "test-harness.adjust", resource: customer("cust_1001", { amountCents: 1_000_001 }) });
+      expect(decision.reasons[0]).toBe(
+          'Denied: no grant gives Jordan Kim test-harness.adjust here. Failed limit: amountCents 1000001 ≤ 10000 (grant "support-t1-agents"); amountCents 1000001 ≤ 1000000 (grant "support-t1-agents").',
+      );
+    });
+
     it("explains denials with no matching grant", () => {
       const decision = check({ actorId: "chris", permission: "audit.read", resource: { attrs: {} } });
       expect(decision).toMatchObject({ effect: "deny", reasons: ["Denied: no grant gives Chris Novak audit.read here."] });
@@ -160,6 +168,47 @@ describe("permission resolver", () => {
     it("denies unknown users and unknown permissions", () => {
       expect(check({ actorId: "mallory", permission: "customer.read", resource: { attrs: {} } }).reasons[0]).toContain('unknown user "mallory"');
       expect(check({ actorId: "jordan", permission: "customer.delete", resource: { attrs: {} } }).reasons[0]).toContain("not defined in the policy config");
+    });
+  });
+
+  describe("conditions on the acting user", () => {
+    const policyWith = (when: Policy["roles"][string]["permissions"][number]["when"]): Policy => ({
+      ...(policy as Policy),
+      roles: { ...policy.roles, "t-role": { description: "", permissions: [{ permission: "audit.read", when }] } },
+      grants: [...policy.grants, { id: "t-grant", to: { user: "riley" }, role: "t-role", description: "" }],
+    });
+    const run = (when: Parameters<typeof policyWith>[0], attrs: Resource["attrs"]) => {
+      const next = policyWith(when);
+      syncGrants(getDb(), next);
+      return checkPermission(getDb(), next, { actorId: "riley", permission: "audit.read", resource: { attrs } }).effect;
+    };
+
+    it("compares an attribute with the actor's id, failing closed when it is unset", () => {
+      expect(run({ attr: "claimedBy", op: "eq", actor: "id" }, { claimedBy: "riley" })).toBe("allow");
+      expect(run({ attr: "claimedBy", op: "eq", actor: "id" }, { claimedBy: "jordan" })).toBe("deny");
+      expect(run({ attr: "openedBy", op: "neq", actor: "id" }, { openedBy: "jordan" })).toBe("allow");
+      expect(run({ attr: "openedBy", op: "neq", actor: "id" }, { openedBy: "riley" })).toBe("deny");
+      expect(run({ attr: "openedBy", op: "neq", actor: "id" }, {})).toBe("deny");
+      expect(run({ attr: "openedBy", op: "neq", actor: "id" }, { openedBy: null })).toBe("deny");
+    });
+  });
+
+  describe("grants for members of several teams", () => {
+    it("rejects all-teams grants with fewer than two teams", () => {
+      const broken: Policy = {
+        ...(policy as Policy),
+        grants: [{ id: "x", to: { allTeams: ["fraud"] }, role: "fraud-analyst", description: "" }],
+      };
+      expect(() => validatePolicy(broken)).toThrow(/at least two different teams/);
+    });
+
+    it("counts membership inherited through child teams", () => {
+      withExtraGrants(getDb(), [{ id: "t-both", to: { allTeams: ["payments-eng", "payments-oncall"] }, role: "fraud-analyst", description: "" }]);
+      expect(getEffectiveGrants("marcus").map((g) => g.id)).toContain("t-both");
+      expect(getEffectiveGrants("priya").map((g) => g.id)).not.toContain("t-both");
+      expect(describeSource(getEffectiveGrants("marcus").find((g) => g.id === "t-both")!.source)).toBe(
+        "granted to members of all of Payments Engineering and Payments On-call",
+      );
     });
   });
 

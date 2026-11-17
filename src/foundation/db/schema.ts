@@ -1,3 +1,6 @@
+/** Bump when the schema changes; older database files are moved aside and recreated. */
+export const SCHEMA_VERSION = 2;
+
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS teams (
   id TEXT PRIMARY KEY,
@@ -35,7 +38,8 @@ CREATE TABLE IF NOT EXISTS customers (
 -- Materialized from policy.config.ts by syncGrants(); never edited by hand or by tools.
 CREATE TABLE IF NOT EXISTS grants (
   id TEXT PRIMARY KEY,
-  subject_type TEXT NOT NULL CHECK (subject_type IN ('user', 'team')),
+  -- 'all-teams' grants list their required teams in grant_teams; subject_id is unused.
+  subject_type TEXT NOT NULL CHECK (subject_type IN ('user', 'team', 'all-teams')),
   subject_id TEXT NOT NULL,
   role TEXT NOT NULL,
   params TEXT NOT NULL DEFAULT '{}',
@@ -46,13 +50,20 @@ CREATE TABLE IF NOT EXISTS grants (
 );
 CREATE INDEX IF NOT EXISTS grants_subject ON grants (subject_type, subject_id);
 
+CREATE TABLE IF NOT EXISTS grant_teams (
+  grant_id TEXT NOT NULL REFERENCES grants(id) ON DELETE CASCADE,
+  team_id TEXT NOT NULL REFERENCES teams(id),
+  PRIMARY KEY (grant_id, team_id)
+);
+
 CREATE TABLE IF NOT EXISTS customer_facts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   customer_id TEXT NOT NULL REFERENCES customers(id),
   namespace TEXT NOT NULL,
   key TEXT NOT NULL,
   value TEXT NOT NULL,
-  published_by TEXT NOT NULL REFERENCES users(id),
+  -- A user id, or "system" for facts published by a tool seed.
+  published_by TEXT NOT NULL,
   published_at TEXT NOT NULL,
   audit_action_id TEXT NOT NULL
 );
@@ -79,7 +90,7 @@ CREATE TABLE IF NOT EXISTS audit (
   action_id TEXT NOT NULL,
   tool TEXT NOT NULL,
   outcome TEXT NOT NULL CHECK (outcome IN (
-    'executed', 'approval-requested', 'approved', 'rejected', 'denied', 'failed'
+    'executed', 'approval-requested', 'approved', 'rejected', 'denied', 'failed', 'seeded'
   )),
   customer_id TEXT,
   approval_id TEXT,
@@ -87,6 +98,62 @@ CREATE TABLE IF NOT EXISTS audit (
   reasons TEXT NOT NULL,
   result TEXT
 );
+
+-- Records tools own (a flag, a case, a refund). Written only by the action pipeline.
+-- product_area, customer_id and attrs are the trusted attributes permission checks read.
+CREATE TABLE IF NOT EXISTS tool_records (
+  id TEXT PRIMARY KEY,
+  tool TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  key TEXT NOT NULL,
+  product_area TEXT,
+  customer_id TEXT REFERENCES customers(id),
+  attrs TEXT NOT NULL,
+  data TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  opened_by TEXT NOT NULL,
+  opened_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (tool, kind, key)
+);
+
+-- Every change to a record and every step of a request about it, append-only.
+CREATE TABLE IF NOT EXISTS record_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_id TEXT NOT NULL REFERENCES tool_records(id),
+  at TEXT NOT NULL,
+  event TEXT NOT NULL CHECK (event IN (
+    'created', 'updated', 'approval-requested', 'approved', 'rejected', 'decision-refused', 'denied', 'failed'
+  )),
+  actor_id TEXT NOT NULL,
+  on_behalf_of TEXT,
+  action_id TEXT NOT NULL,
+  approval_id TEXT,
+  audit_id INTEGER NOT NULL REFERENCES audit(id),
+  version INTEGER NOT NULL,
+  attrs TEXT NOT NULL,
+  data TEXT NOT NULL,
+  reasons TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS record_history_record ON record_history (record_id, id);
+
+CREATE TABLE IF NOT EXISTS seed_runs (
+  id TEXT PRIMARY KEY,
+  tool TEXT NOT NULL,
+  ran_at TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS record_history_no_update
+BEFORE UPDATE ON record_history
+BEGIN
+  SELECT RAISE(ABORT, 'record history is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS record_history_no_delete
+BEFORE DELETE ON record_history
+BEGIN
+  SELECT RAISE(ABORT, 'record history is append-only');
+END;
 
 CREATE TRIGGER IF NOT EXISTS audit_no_update
 BEFORE UPDATE ON audit

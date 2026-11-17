@@ -6,6 +6,8 @@ export interface ConditionResult {
   passed: boolean;
   /** Human-readable explanation, e.g. "amountCents 75000 ≤ maxAmountCents (50000) is false". */
   explanation: string;
+  /** The comparisons that failed, e.g. "amountCents 75000 ≤ maxAmountCents (50000)". */
+  failures: string[];
 }
 
 function format(value: AttrValue | AttrValue[] | undefined): string {
@@ -32,39 +34,44 @@ function compare(op: keyof typeof OP_LABEL, actual: AttrValue | undefined, expec
   }
 }
 
+/** Evaluates a condition on resource attributes, role params and the acting user's id. */
 export function evaluateCondition(
   condition: Condition,
   attrs: Record<string, AttrValue>,
   params: Record<string, number | string>,
+  actorId?: string,
 ): ConditionResult {
   if ("all" in condition) {
-    const results = condition.all.map((c) => evaluateCondition(c, attrs, params));
+    const results = condition.all.map((c) => evaluateCondition(c, attrs, params, actorId));
     return {
       passed: results.every((r) => r.passed),
       explanation: results.map((r) => r.explanation).join(" and "),
+      failures: results.flatMap((r) => (r.passed ? [] : r.failures)),
     };
   }
   if ("any" in condition) {
-    const results = condition.any.map((c) => evaluateCondition(c, attrs, params));
+    const results = condition.any.map((c) => evaluateCondition(c, attrs, params, actorId));
+    const passed = results.some((r) => r.passed);
     return {
-      passed: results.some((r) => r.passed),
+      passed,
       explanation: `(${results.map((r) => r.explanation).join(" or ")})`,
+      failures: passed ? [] : results.flatMap((r) => r.failures),
     };
   }
 
   const actual = Object.hasOwn(attrs, condition.attr) ? attrs[condition.attr] : undefined;
-  let expected: AttrValue | AttrValue[] | undefined;
+  let passed: boolean;
   let expectedLabel: string;
-  if ("param" in condition) {
-    expected = params[condition.param];
-    expectedLabel = `${condition.param} (${format(expected)})`;
+  if ("actor" in condition) {
+    // Fails closed: an unset attribute never matches, and never counts as "not the actor".
+    expectedLabel = `actor (${actorId ?? "unknown"})`;
+    passed =
+      typeof actual === "string" && actual !== "" && actorId !== undefined && compare(condition.op, actual, actorId);
   } else {
-    expected = condition.value;
-    expectedLabel = format(expected);
+    const expected = "param" in condition ? params[condition.param] : condition.value;
+    expectedLabel = "param" in condition ? `${condition.param} (${format(expected)})` : format(expected);
+    passed = expected !== undefined && compare(condition.op, actual, expected);
   }
-  const passed = expected !== undefined && compare(condition.op, actual, expected);
-  return {
-    passed,
-    explanation: `${condition.attr} ${format(actual)} ${OP_LABEL[condition.op]} ${expectedLabel} is ${passed}`,
-  };
+  const comparison = `${condition.attr} ${format(actual)} ${OP_LABEL[condition.op]} ${expectedLabel}`;
+  return { passed, explanation: `${comparison} is ${passed}`, failures: passed ? [] : [comparison] };
 }

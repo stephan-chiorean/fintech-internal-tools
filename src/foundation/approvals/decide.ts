@@ -1,9 +1,10 @@
 import { appendAudit } from "@/foundation/audit/log";
+import { appendHistory, type ToolRecord } from "@/foundation/data/records";
 import { getDb } from "@/foundation/db";
 import { type Decision, checkPermission } from "@/foundation/permissions/resolver";
 import { loadActor } from "@/foundation/permissions/grants";
 import { getActivePolicy } from "@/foundation/policy/active";
-import { PipelineDenial, buildResource, errorMessage, executeWithAudit } from "@/foundation/pipeline/execute";
+import { PipelineDenial, buildResource, errorMessage, executeWithAudit, targetRecord } from "@/foundation/pipeline/execute";
 import { getAction } from "@/foundation/pipeline/registry";
 import { consumeApproval, loadApproval } from "./requests";
 
@@ -19,7 +20,8 @@ const ALREADY_USED = "this approval was already used";
 /**
  * Approves or rejects a pending request. Re-runs the full permission check for
  * the approver against current data, applies guardrails, consumes the approval
- * exactly once, and writes exactly one audit row.
+ * exactly once, and writes exactly one audit row. Every attempt, including
+ * refused ones, is also recorded in the history of the record the request targets.
  */
 export function decideApproval(
   approverId: string,
@@ -32,29 +34,45 @@ export function decideApproval(
   const def = approval ? getAction(approval.action_id) : undefined;
 
   let input: unknown = approval ? JSON.parse(approval.input) : null;
+  let record: ToolRecord | null = null;
   const deny = (reasons: string[]): ApprovalDecisionResult => ({
     outcome: "denied",
     reasons,
-    auditId: appendAudit(db, {
-      actorId: approverId,
-      actionId: approval?.action_id ?? "approvals.decide",
-      tool: approval?.tool ?? "approvals",
-      outcome: "denied",
-      customerId: approval?.customer_id,
-      approvalId,
-      input,
-      reasons,
-    }),
+    auditId: db.transaction(() => {
+      const auditId = appendAudit(db, {
+        actorId: approverId,
+        actionId: approval?.action_id ?? "approvals.decide",
+        tool: approval?.tool ?? "approvals",
+        outcome: "denied",
+        customerId: approval?.customer_id,
+        approvalId,
+        input,
+        reasons,
+      });
+      if (record) {
+        appendHistory(db, {
+          record,
+          event: "decision-refused",
+          actorId: approverId,
+          actionId: approval!.action_id,
+          approvalId,
+          auditId,
+          reasons: [`Refused ${decision} attempt.`, ...reasons],
+        });
+      }
+      return auditId;
+    })(),
   });
 
   if (!approval) return deny([`Denied: approval "${approvalId}" does not exist.`]);
-  if (approval.status !== "pending") return deny([`Denied: ${ALREADY_USED} (${approval.status}).`]);
   if (!def) return deny([`Denied: action "${approval.action_id}" is no longer registered.`]);
   try {
     input = def.parse(input);
   } catch (error) {
     return deny([`Denied: stored input is no longer valid: ${errorMessage(error)}`]);
   }
+  record = targetRecord(db, def, input);
+  if (approval.status !== "pending") return deny([`Denied: ${ALREADY_USED} (${approval.status}).`]);
   const approver = loadActor(db, approverId);
   if (!approver) return deny([`Denied: unknown user "${approverId}".`]);
 
@@ -75,7 +93,8 @@ export function decideApproval(
     try {
       const auditId = db.transaction(() => {
         if (!consumeApproval(db, approvalId, "rejected", approverId)) throw new PipelineDenial(ALREADY_USED);
-        return appendAudit(db, {
+        const reasons = [`Rejected by ${approver.name}.`, ...approverDecision.reasons];
+        const id = appendAudit(db, {
           actorId: approverId,
           actionId: def.id,
           tool: def.tool,
@@ -83,8 +102,12 @@ export function decideApproval(
           customerId: built.customerId,
           approvalId,
           input,
-          reasons: [`Rejected by ${approver.name}.`, ...approverDecision.reasons],
+          reasons,
         });
+        if (built.record) {
+          appendHistory(db, { record: built.record, event: "rejected", actorId: approverId, actionId: def.id, approvalId, auditId: id, reasons });
+        }
+        return id;
       })();
       return { outcome: "rejected", auditId, reasons: approverDecision.reasons };
     } catch (error) {
@@ -93,7 +116,7 @@ export function decideApproval(
   }
 
   // The requester must still be allowed to make the request at approval time.
-  const requesterResource = buildResource(db, def, input);
+  const requesterResource = buildResource(db, def, input, {}, approval.requested_by);
   const requesterDecision = checkPermission(db, policy, {
     actorId: approval.requested_by,
     permission: def.permission,
@@ -115,10 +138,12 @@ export function decideApproval(
     actor: requester,
     auditActorId: approverId,
     input,
-    customerId: built.customerId,
+    built,
     approvalId,
     outcome: "approved",
     reasons,
+    historyEvent: "approved",
+    deniedEvent: "decision-refused",
     before: () => {
       if (!consumeApproval(db, approvalId, "approved", approverId)) throw new PipelineDenial(ALREADY_USED);
     },

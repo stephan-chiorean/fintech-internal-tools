@@ -17,6 +17,8 @@ export type Comparison = "eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in";
 export type Condition =
   | { attr: string; op: Comparison; value: AttrValue | AttrValue[] }
   | { attr: string; op: Exclude<Comparison, "in">; param: string }
+  /** Compares an attribute with the acting user's id, e.g. "claimedBy = actor" or "openedBy ≠ actor". */
+  | { attr: string; op: "eq" | "neq"; actor: "id" }
   | { all: Condition[] }
   | { any: Condition[] };
 
@@ -26,6 +28,8 @@ export interface PermissionDefinition<P extends string> {
   approvalPermission?: NoInfer<P>;
   /** Marks a permission used to approve requests. Guardrails apply to these. */
   isApproval?: boolean;
+  /** Marks a permission that decides a record (e.g. a KYC case). Decision guardrails apply to these. */
+  isDecision?: boolean;
 }
 
 export interface RolePermission<P extends string> {
@@ -44,7 +48,8 @@ export interface RoleDefinition<P extends string> {
   permissions: RolePermission<P>[];
 }
 
-export type GrantSubject = { user: string } | { team: string };
+/** `allTeams`: the user must belong to every listed team (directly or through a child team). */
+export type GrantSubject = { user: string } | { team: string } | { allTeams: string[] };
 
 export type GrantScope = { productArea: string } | { customerId: string };
 
@@ -67,13 +72,15 @@ export interface FieldMaskingRule<P extends string> {
 
 export type GuardrailRule =
   | { kind: "actor-is-requester" }
-  | { kind: "actor-attribute"; attribute: "isContractor"; equals: boolean };
+  | { kind: "actor-attribute"; attribute: "isContractor"; equals: boolean }
+  /** Denies when the actor's id equals any of these resource attributes, or when none is set. */
+  | { kind: "actor-matches-attribute"; attributes: string[] };
 
 /** Guardrails deny regardless of any grant. */
 export interface Guardrail {
   id: string;
   description: string;
-  appliesTo: "approval-permissions";
+  appliesTo: "approval-permissions" | "decision-permissions";
   rule: GuardrailRule;
 }
 
