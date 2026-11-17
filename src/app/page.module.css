@@ -1,0 +1,54 @@
+.main {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 64px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lead {
+  font-size: 1.125rem;
+  line-height: 1.6;
+  opacity: 0.8;
+}
+
+.main h2 {
+  margin-top: 24px;
+  font-size: 1.25rem;
+}
+
+.tools {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tool {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  border-radius: 8px;
+}
+
+.tool h3 {
+  font-size: 1rem;
+  margin-bottom: 4px;
+}
+
+.tool p {
+  opacity: 0.7;
+}
+
+.badge {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.15);
+}
