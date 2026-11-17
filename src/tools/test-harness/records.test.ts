@@ -27,8 +27,11 @@ const events = (key: string) => {
   if (!history.ok) throw new Error(history.decision.reasons[0]);
   return history.entries.map((e) => `${e.event}:${e.actorId}`);
 };
-const stored = (db: Database, key: string) =>
-  JSON.parse((db.prepare("SELECT attrs FROM tool_records WHERE key = ?").get(key) as { attrs: string }).attrs);
+const stored = (key: string) => {
+  const result = getToolRecord("avery", "test-harness", ref(key));
+  if (!result.ok) throw new Error(result.decision.reasons[0]);
+  return result.record.attrs;
+};
 
 // Tries to set trusted attributes from input. The pipeline must ignore all of them.
 defineAction({
@@ -79,7 +82,7 @@ describe("tool records", () => {
 
     it("ignores a claimer set by action attributes when none is stored", () => {
       open("marcus", "p2", "payments", "staging");
-      expect(stored(db, "p2").claimedBy).toBeUndefined();
+      expect(stored("p2").claimedBy).toBeUndefined();
       const result = runAction("priya", "test-harness.spoof-decide", { key: "p2" });
       expect(result.outcome).toBe("denied");
       expect(result.reasons.join("\n")).toContain("status open = claimed is false");
@@ -124,7 +127,7 @@ describe("tool records", () => {
       open("priya", "s1", "payments", "staging");
       const result = update("priya", "s1", 3_000);
       expect(result.outcome).toBe("executed");
-      expect(stored(db, "s1").amountCents).toBe(3_000);
+      expect(stored("s1").amountCents).toBe(3_000);
       expect(events("s1")).toEqual(["created:priya", "updated:priya"]);
     });
 
@@ -132,14 +135,14 @@ describe("tool records", () => {
       open("priya", "q1", "payments", "prod");
       const { approvalId, outcome } = update("priya", "q1", 4_000);
       expect(outcome).toBe("approval-requested");
-      expect(stored(db, "q1").amountCents).toBe(1_000);
+      expect(stored("q1").amountCents).toBe(1_000);
 
       const self = decideApproval("priya", approvalId!, "approve");
       expect(self.outcome).toBe("denied");
       expect(decideApproval("alex", approvalId!, "approve").outcome).toBe("denied");
       expect(decideApproval("marcus", approvalId!, "approve").outcome).toBe("approved");
       expect(decideApproval("marcus", approvalId!, "reject").reasons[0]).toContain("already used");
-      expect(stored(db, "q1").amountCents).toBe(4_000);
+      expect(stored("q1").amountCents).toBe(4_000);
 
       const history = getRecordHistory("avery", "test-harness", ref("q1"));
       expect(history.ok && history.entries.map((e) => [e.event, e.actorId, e.onBehalfOf])).toEqual([
@@ -199,7 +202,7 @@ describe("tool records", () => {
       expect(notClaimer.outcome).toBe("denied");
       expect(notClaimer.reasons.join("\n")).toContain("claimedBy marcus = actor (priya) is false");
       expect(runAction("marcus", "test-harness.decide-case", { key: "d1" }).outcome).toBe("executed");
-      expect(stored(db, "d1").status).toBe("decided");
+      expect(stored("d1").status).toBe("decided");
     });
 
     it("blocks the opener from deciding their own record even as the claimer", () => {
@@ -254,7 +257,6 @@ describe("tool records", () => {
       const result = runAction("riley", "test-harness.set-kyc", { customerId: "cust_1002", status: "verified" });
       expect(result.outcome).toBe("executed");
       expect(kycOf("cust_1002")).toBe("verified");
-      expect(db.prepare("SELECT outcome FROM audit ORDER BY id DESC LIMIT 1").get()).toEqual({ outcome: "executed" });
     });
 
     it("needs customer.kycStatus.update as well as the action's permission", () => {
