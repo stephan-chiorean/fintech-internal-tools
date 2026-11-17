@@ -78,6 +78,15 @@ describe("KYC review", () => {
     expect(stored("kyc-1001").attrs.status).toBe("claimed");
   });
 
+  it("only opens cases whose key is safe in a URL", () => {
+    for (const key of ["review%1", "kyc 1", "kyc/1"]) {
+      const result = open("riley", key, "cust_1002");
+      expect(result.outcome).toBe("denied");
+      expect(result.reasons[0]).toContain("invalid input");
+    }
+    expect(open("riley", "kyc_2001-a", "cust_1002").outcome).toBe("executed");
+  });
+
   it("only the analyst who claimed a case decides or escalates it, and only once", () => {
     claim("riley", "kyc-1001");
     expect(claim("avery", "kyc-1001").outcome).toBe("denied");

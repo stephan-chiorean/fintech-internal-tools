@@ -12,5 +12,5 @@ export default function KycCase({ params }: PageProps<"/kyc-review/[key]">) {
 
 async function CaseContent({ params }: Pick<PageProps<"/kyc-review/[key]">, "params">) {
   const [{ key }, viewerId] = await Promise.all([params, getCurrentUserId()]);
-  return viewerId ? <CaseScreen key={viewerId} viewerId={viewerId} caseKey={decodeURIComponent(key)} /> : null;
+  return viewerId ? <CaseScreen key={viewerId} viewerId={viewerId} caseKey={key} /> : null;
 }

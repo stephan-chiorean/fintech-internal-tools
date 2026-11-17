@@ -49,6 +49,12 @@ function decision(value: unknown): Decision {
   return value;
 }
 
+function caseKey(value: unknown): string {
+  const key = text(value, "key", 64);
+  if (!/^[A-Za-z0-9_-]+$/.test(key)) throw new InvalidInputError("key may only contain letters, digits, - and _");
+  return key;
+}
+
 const keyInput = (raw: unknown) => ({ key: text(object(raw).key, "key") });
 const caseRef = <I extends { key: string }>(input: I) => ({ kind: CASE, key: input.key });
 const caseData = (ctx: ActionContext) => (ctx.record?.data ?? {}) as unknown as CaseData;
@@ -94,7 +100,7 @@ defineAction({
   parse: (raw): OpenInput => {
     const { key, customerId, note } = object(raw);
     return {
-      key: key === undefined ? `kyc-${randomUUID().slice(0, 8)}` : text(key, "key"),
+      key: key === undefined ? `kyc-${randomUUID().slice(0, 8)}` : caseKey(key),
       customerId: text(customerId, "customerId"),
       note: text(note, "note", 500),
     };
