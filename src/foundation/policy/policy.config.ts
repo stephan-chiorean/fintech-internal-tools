@@ -41,6 +41,13 @@ export const policy = definePolicy({
     "test-harness.case.claim": { description: "Claim an open test case (test harness only)" },
     "test-harness.case.decide": { description: "Decide a claimed test case (test harness only)", isDecision: true },
     "test-harness.kyc.set": { description: "Set a customer's KYC status (test harness only)" },
+    "refunds.refund.read": { description: "View refunds and their history" },
+    "refunds.request": { description: "Request a refund for a customer" },
+    "refunds.issue": {
+      description: "Issue a requested refund (moves money, so it always needs a second person)",
+      approvalPermission: "refunds.issue.approve",
+    },
+    "refunds.issue.approve": { description: "Approve issuing a refund", isApproval: true },
   },
 
   roles: {
@@ -146,6 +153,37 @@ export const policy = definePolicy({
         { permission: "feature-flags.toggle.approve", when: { attr: "env", op: "eq", value: "prod" } },
       ],
     },
+    "refunds-viewer": {
+      description: "View refunds and their history",
+      permissions: [
+        { permission: "refunds.refund.read" },
+        { permission: "facts.read", when: { attr: "namespace", op: "eq", value: "refunds" } },
+      ],
+    },
+    "refunds-requester": {
+      description: "Request refunds; issuing one always needs approval",
+      permissions: [
+        { permission: "refunds.refund.read" },
+        { permission: "facts.read", when: { attr: "namespace", op: "eq", value: "refunds" } },
+        { permission: "refunds.request" },
+        {
+          permission: "refunds.issue",
+          effect: "approval-required",
+          when: { all: [{ attr: "status", op: "eq", value: "requested" }, { attr: "openedBy", op: "eq", actor: "id" }] },
+        },
+      ],
+    },
+    "refunds-approver": {
+      description: "Approve refunds up to a limit",
+      params: { maxAmountCents: "number" },
+      permissions: [
+        { permission: "refunds.refund.read" },
+        {
+          permission: "refunds.issue.approve",
+          when: { all: [{ attr: "status", op: "eq", value: "requested" }, { attr: "amountCents", op: "lte", param: "maxAmountCents" }] },
+        },
+      ],
+    },
     // Test-harness case roles. The policy grants none of them; tests add grants (see test-harness/records.test.ts).
     "test-harness-case-worker": {
       description: "Work test cases (test harness only)",
@@ -188,6 +226,10 @@ export const policy = definePolicy({
     { id: "payments-eng-flag-engineers", to: { team: "payments-eng" }, role: "flag-engineer", scope: { productArea: "payments" }, description: "Payments engineers change payments flags (prod needs approval)" },
     { id: "payments-oncall-flag-approvers", to: { team: "payments-oncall" }, role: "flag-approver", scope: { productArea: "payments" }, description: "Payments on-call approves prod payments flag changes" },
     { id: "refunds-ops-specialists", to: { team: "refunds-ops" }, role: "refunds-specialist", description: "Refunds ops handles refunds" },
+    { id: "basic-support-refund-viewers", to: { team: "basic-support" }, role: "refunds-viewer", description: "All support staff, contractors included, can view refunds" },
+    { id: "support-t1-refund-requesters", to: { team: "support-t1" }, role: "refunds-requester", description: "Tier 1 and Tier 2 request refunds" },
+    { id: "refunds-ops-refund-requesters", to: { team: "refunds-ops" }, role: "refunds-requester", description: "Refunds ops requests refunds" },
+    { id: "refunds-ops-refund-approvers", to: { team: "refunds-ops" }, role: "refunds-approver", params: { maxAmountCents: 250_000 }, description: "Refunds ops approves refunds up to $2,500" },
     { id: "kyc-review-reviewers", to: { team: "kyc-review" }, role: "kyc-reviewer", description: "KYC reviewers check identities" },
     { id: "compliance-auditors", to: { team: "compliance" }, role: "compliance-auditor", description: "Compliance audits all activity" },
     { id: "fraud-analysts", to: { team: "fraud" }, role: "fraud-analyst", description: "Fraud investigates risky customers" },

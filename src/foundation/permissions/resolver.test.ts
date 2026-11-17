@@ -19,13 +19,19 @@ describe("permission resolver", () => {
   describe("team inheritance", () => {
     it("gives Tier 2 the grants of Tier 1 and Basic Support through the team tree", () => {
       const grants = getEffectiveGrants("taylor").map((g) => g.id);
-      expect(grants).toEqual(["support-t2-approvers", "support-t1-agents", "basic-support-agents"]);
+      expect(grants).toEqual([
+        "support-t2-approvers",
+        "support-t1-agents",
+        "support-t1-refund-requesters",
+        "basic-support-agents",
+        "basic-support-refund-viewers",
+      ]);
       const inherited = getEffectiveGrants("taylor").find((g) => g.id === "basic-support-agents")!;
       expect(inherited.source).toMatchObject({ type: "team", teamId: "basic-support", memberOf: "support-t2", depth: 2 });
     });
 
     it("gives BPO contractors Basic Support grants but not Tier 1 grants", () => {
-      expect(getEffectiveGrants("alex").map((g) => g.id)).toEqual(["basic-support-agents"]);
+      expect(getEffectiveGrants("alex").map((g) => g.id)).toEqual(["basic-support-agents", "basic-support-refund-viewers"]);
       expect(check({ actorId: "alex", permission: "customer.read", resource: customer("cust_1001") }).effect).toBe("allow");
       expect(check({ actorId: "alex", permission: "customer.ssn.last4", resource: customer("cust_1001") }).effect).toBe("deny");
     });

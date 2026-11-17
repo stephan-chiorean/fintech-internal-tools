@@ -30,9 +30,11 @@ describe("server actions end to end", () => {
 
   it("denies an unauthorized call", async () => {
     signInAs("alex");
+    const factCount = () => db.prepare("SELECT COUNT(*) AS n FROM customer_facts").get();
+    const factsBefore = factCount();
     const result = await adjust("cust_1001", 1_000);
     expect(result.outcome).toBe("denied");
-    expect(db.prepare("SELECT COUNT(*) AS n FROM customer_facts").get()).toEqual({ n: 0 });
+    expect(factCount()).toEqual(factsBefore);
 
     session.userId = null;
     expect((await adjust("cust_1001", 1_000)).reasons[0]).toContain('unknown user "anonymous"');

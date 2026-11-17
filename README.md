@@ -6,7 +6,7 @@ A prototype that rebuilds a fintech client's Microsoft Power Apps internal tools
 
 The client runs three internal tools on Power Apps (a KYC review queue, a refunds dashboard and a feature-flag admin panel) and plans 10+ more. This repo shows they can all run as modules in one application, sharing permissions, customer data, an action pipeline, approvals, audit and a common shell.
 
-**Status:** the shared foundation and shell are built, including tool-owned records with history, seeds and decision guardrails for the planned tools. The Feature Flags tool is built; a test-only harness tool exercises the pipeline. The database is created and seeded with fake data at `.data/app.db` on first run (delete it to reset). A database from an older schema version is moved aside automatically and recreated.
+**Status:** the shared foundation and shell are built, including tool-owned records with history, seeds and decision guardrails for the planned tools. The Feature Flags and Refunds tools are built; a test-only harness tool exercises the pipeline. The database is created and seeded with fake data at `.data/app.db` on first run (delete it to reset). A database from an older schema version is moved aside automatically and recreated.
 
 ## How to run it
 
@@ -32,6 +32,7 @@ Switch users with the picker in the header (mock sign-in, no passwords).
 - **Scope:** as Priya (payments engineering), only payments customers appear. As Jamie (fraud), Sam Okafor's full details show because of a grant scoped to that one customer.
 - **Pipeline:** as Jordan, post a $50 test adjustment on Dana's page (runs directly), then $200 (creates an approval). As Alex, any adjustment is denied with the reason shown.
 - **Approvals:** as Taylor (Tier 2, approves up to $500), approve Jordan's request on Approvals. Try approving your own request as Taylor, or approving as Alex: both are blocked by guardrails.
+- **Refunds:** as Chris (refunds ops, approves up to $2,500), the dashboard card lists refunds waiting for his approval: Taylor's seeded $2,500 refund. Jordan's seeded $4,200 refund on Dana's page is above his limit, and approving his own seeded refund on Grace Liu's page is blocked. As Jordan, request an $840 refund on Dana's page; as Chris, approve it. Each refund's history (request, every refused attempt, approval, issue) opens under it. As Alex (contractor), refunds are visible but can't be requested or approved.
 - **Audit:** as Morgan (compliance), open Audit log to see one row per action, approval decision and denial. The table can't be updated or deleted.
 - **Feature flags:** as Priya, open Feature flags and turn off `payments.instant-payouts` in staging (applies at once), then turn it on in prod (creates an approval). The cards flag is hidden from her. As Marcus, approve it from the dashboard card; a prod change Marcus requests himself is blocked from his own approval. Each flag's history lists every change, request and refused attempt, with rollback buttons that follow the same rules.
 - **Explanations:** the dashboard lists each signed-in user's grants and where they come from (direct or inherited through the team tree).
@@ -46,7 +47,7 @@ Switch users with the picker in the header (mock sign-in, no passwords).
 | Action pipeline | Direct writes and Power Automate flows set up per app | Built |
 | Approvals | Power Automate approval flows | Built |
 | Audit log | Per-app or table-level auditing | Built |
-| Tool modules (`src/tools/`) | Individual canvas or model-driven apps | Feature flags built; KYC queue and refunds next |
+| Tool modules (`src/tools/`) | Individual canvas or model-driven apps | Feature flags and refunds built; KYC queue next |
 
 ## How the foundation works
 
@@ -56,9 +57,15 @@ Switch users with the picker in the header (mock sign-in, no passwords).
 | Policy | `src/foundation/policy/policy.config.ts` | The single place for permissions: roles (with parameters such as "approve up to $X"), grants to users, teams or members of all of several teams (optionally scoped to a product area or one customer), conditions on resource data and on the acting user, field masking (`full`/`last4`/`hidden`) and guardrails (no self-approval, contractors never approve, nobody decides a record they opened). Validated at startup. |
 | Permissions | `src/foundation/permissions/` | Resolves direct grants plus grants inherited from ancestor teams (recursive CTE), applies scope, conditions and guardrails, and returns allow / approval-required / deny with human-readable reasons; denials name the failed limit. |
 | Shared data | `src/foundation/data/` | Customer profiles with each sensitive field masked for the viewer; customer facts and tool records (with history) that tools read across tools with the same checks. |
-| Pipeline | `src/foundation/pipeline/` | `runAction` is the only write path: execute, request approval or deny, with exactly one audit row per call. Action writes, record history and their audit row commit in one transaction. Record attributes used by checks come from storage, never from input. Tool seeds run once per database through the same path. |
+| Pipeline | `src/foundation/pipeline/` | `runAction` is the only write path: execute, request approval or deny, with exactly one audit row per call. Action writes, record history and their audit row commit in one transaction. Record attributes used by checks come from storage, never from input. Tool seeds run once per database through the same path, as the system actor or as a named user with that user's permission checks. |
 | Approvals | `src/foundation/approvals/` | Single-use. At decision time the approver's permission (and the requester's) is checked again against current policy, data and team membership. Every attempt is recorded in the target record's history. |
-| Shell | `src/shell/` | Mock user switcher, navigation, dashboard, customers, approvals and audit pages, and `dashboard`/`customer` slots tools register into. |
+| Shell | `src/shell/` | Mock user switcher, navigation, dashboard, customers, approvals and audit pages, and `dashboard`/`customer` slots tools register into. Shared UI for tools in `src/shell/components/`: `RecordTable` (list table), `HistoryTimeline` (a record's history) and `ApprovalButtons` (approve/deny controls that show the server's reasons). |
+
+## Tools
+
+| Tool | Where | What it does |
+| --- | --- | --- |
+| Refunds | `src/tools/refunds/` | Maker-checker refunds. `refunds.request` creates a refund record (status `requested`); `refunds.issue` is always approval-required and only the refund's opener can submit it. Support Tier 1 and 2 and refunds ops request; all support staff, contractors included, view; refunds ops approves up to $2,500 (`refunds-ops-refund-approvers`). Guardrails block self-approval and contractors. The approved issue runs as the requester and sets status `issued`. Dashboard card: refunds waiting for my approval. Customer page: that customer's refunds with history and controls. Other tools read refunds with `listToolRecords`/`getRecordHistory(viewerId, "refunds", …)` (permission `refunds.refund.read`) and each customer's `refund.requested`/`refund.issued` facts with `getCustomerFacts(…, { namespace: "refunds" })` (`facts.read` on namespace `refunds`). Seeds three pending refunds: $4,200 by Jordan, $1,250 by Chris and exactly $2,500 by Taylor. |
 
 How a tool plugs in is documented in `AGENTS.md` ("Building a tool"). ESLint blocks tools from importing the database or permission internals.
 
@@ -74,6 +81,8 @@ How a tool plugs in is documented in `AGENTS.md` ("Building a tool"). ESLint blo
 - **SQLite with fake data.** Runs anywhere with `npm install` and needs no database server. It isn't a production database.
 - **Typecheck runs `next typegen` first.** Next.js generates global route types such as `LayoutProps`, so `tsc` needs them before it runs on a fresh checkout or in CI.
 - **Policy in code, materialized into SQLite.** `policy.config.ts` is typed and reviewed like code; grants are synced into the `grants` table so the resolver can join them with the team tree in one query. The tradeoff is that changing access needs a deploy.
+- **Refund request and issue are two actions.** An approval-gated `newRecord` action has no record until it's approved, so a pending refund would be invisible. Instead `refunds.request` creates the record directly and `refunds.issue` asks for approval on it. If the second call fails, the refund stays `requested` (its history shows why) and its opener can submit it again.
+- **Refund facts cover executed steps only.** `refund.requested` and `refund.issued` facts are published by the actions; rejections and refused attempts don't execute an action, so they're only in the refund's record history.
 - **Synchronous `better-sqlite3`.** Actions run inside one transaction with their audit row, so a failed action leaves only a `failed` audit entry. Action `execute` functions must be synchronous.
 - **Approvals execute as the requester.** The approved action runs with the requester's identity and the audit row records the approver, so both are rechecked and attributable.
 - **Generic tool records instead of tables per tool.** Tools never touch the database, so the foundation stores their records, attributes and history. Attributes that permission checks read must be declared, which keeps them trusted, but it means a tool can't add its own indexes or columns.
@@ -83,6 +92,7 @@ How a tool plugs in is documented in `AGENTS.md` ("Building a tool"). ESLint blo
 
 - Foundation and shell: `npm test`, `npm run typecheck` and `npm run lint` pass. Tests cover team inheritance, all-teams grants, scope, conditions (including on the acting user), guardrails, decision explanations and failed limits, masking, cross-tool facts, tool records (trusted attributes can't be set from input, history and request lifecycle, reads scoped by kind and status), seeds, KYC status updates, approval recheck and single use, audit and history immutability, and end-to-end checks that call the shell's server actions directly.
 - Feature flags (`src/tools/feature-flags/`): tests cover staging toggles applying at once, prod toggles and rollbacks waiting for payments on-call approval, no self-approval, product-area scope (Priya can't touch cards flags), complete history, and the five end-to-end security checks through the shell's server actions.
+- Refunds: tests cover Chris approving $840, Chris denied on $4,200 with the $2,500 limit named, exactly $2,500 allowed, Chris blocked on his own refund, Alex never approving (even with an approver grant), complete history linked to audit rows, rejection and resubmission, opener-only submission, no double issue, published facts, the seeds, the dashboard card and customer view, and five end-to-end security checks through the shell's server actions (unauthorized calls write nothing, approver losing permission, self-approval, no unmasked fields in responses or rendered refunds, exactly one audit row per mutation).
 
 ## What's mocked and what production would need
 

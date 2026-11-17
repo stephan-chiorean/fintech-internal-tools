@@ -249,6 +249,8 @@ export function executeWithAudit(
     historyEvent?: HistoryEvent;
     /** The history event recorded when the call is denied inside the transaction. */
     deniedEvent?: HistoryEvent;
+    /** A system seed: permission checks inside the action (e.g. KYC status) are skipped. */
+    systemSeed?: boolean;
   },
 ): ExecutionResult {
   const { def, actor, input, built, approvalId, outcome, reasons } = args;
@@ -270,7 +272,7 @@ export function executeWithAudit(
         history.push({ event: "created", record: target.record, reasons });
       }
       if (args.historyEvent && target.record) history.push({ event: args.historyEvent, record: target.record, reasons });
-      const result = def.execute(makeContext(db, policy, def, actor, approvalId, built, target, history, outcome === "seeded"), input);
+      const result = def.execute(makeContext(db, policy, def, actor, approvalId, built, target, history, args.systemSeed === true), input);
       const auditId = appendAudit(db, { ...audit, outcome, reasons, result });
       writeHistory(history, auditId);
       return { status: "done", auditId, result };
