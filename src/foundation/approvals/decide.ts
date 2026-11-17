@@ -5,14 +5,12 @@ import { loadActor } from "@/foundation/permissions/grants";
 import { getActivePolicy } from "@/foundation/policy/active";
 import { PipelineDenial, buildResource, errorMessage, executeWithAudit } from "@/foundation/pipeline/execute";
 import { getAction } from "@/foundation/pipeline/registry";
-import type { JsonValue } from "@/foundation/pipeline/types";
 import { consumeApproval, loadApproval } from "./requests";
 
 export interface ApprovalDecisionResult {
   outcome: "approved" | "rejected" | "denied" | "failed";
   auditId: number;
   reasons: string[];
-  result?: JsonValue | void;
   error?: string;
 }
 
@@ -125,8 +123,7 @@ export function decideApproval(
       if (!consumeApproval(db, approvalId, "approved", approverId)) throw new PipelineDenial(ALREADY_USED);
     },
   });
-  if (execution.status === "done") {
-    return { outcome: "approved", auditId: execution.auditId, reasons, result: execution.result };
-  }
+  // The action's result is shaped (and masked) for the requester, so it is never returned to the approver.
+  if (execution.status === "done") return { outcome: "approved", auditId: execution.auditId, reasons };
   return { outcome: execution.status, auditId: execution.auditId, reasons, error: execution.error };
 }

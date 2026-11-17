@@ -32,6 +32,12 @@ describe("approvals", () => {
     });
   });
 
+  it("never returns the requester's masked view of the result to the approver", () => {
+    const result = decideApproval("marcus", request("jordan", "cust_1001", 20_000), "approve");
+    expect(result.outcome).toBe("approved");
+    expect(JSON.stringify(result)).not.toContain("4821");
+  });
+
   it("is single-use: a second approve or a reject after approval is denied", () => {
     const id = request("jordan", "cust_1001", 20_000);
     expect(decideApproval("taylor", id, "approve").outcome).toBe("approved");
