@@ -47,3 +47,7 @@
 .badge-allow, .badge-executed, .badge-approved, .badge-full { background: rgba(22, 163, 74, 0.18); }
 .badge-approval-requested, .badge-approval-required, .badge-pending, .badge-last4 { background: rgba(234, 179, 8, 0.22); }
 .badge-deny, .badge-denied, .badge-failed, .badge-rejected, .badge-hidden { background: rgba(220, 38, 38, 0.18); }
+.badge-issued { background: rgba(22, 163, 74, 0.18); }
+.badge-pending-approval { background: rgba(234, 179, 8, 0.22); }
+.timeline { display: flex; flex-direction: column; gap: 10px; padding-left: 18px; font-size: 0.875rem; }
+.expandRow td { padding-top: 0; }

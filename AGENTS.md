@@ -30,6 +30,7 @@ A tool lives in `src/tools/<tool>/`, uses only the foundation's public entry poi
 - **KYC status.** An action with a customer can call `ctx.setCustomerKycStatus(status)`. The pipeline also requires `customer.kycStatus.update` for the acting user on the action's resource.
 - **Shared customer data and facts.** Read customers with `getCustomerProfile(viewerId, customerId)` / `listCustomers(viewerId)` from `@/foundation/data`; sensitive fields arrive already masked (`full`, `last4`, `hidden`), so render what you get. Share data with other tools by publishing facts (`ctx.publishFact(customerId, key, value)`, stored under your tool's namespace) and read other tools' facts with `getCustomerFacts(viewerId, customerId, { namespace })`, which applies the same `customer.read` and `facts.read` checks. Never read another tool's tables.
 - **Shell slots.** Call `registerTool({ id, name, description, nav?, slots })` from `@/shell/extensions` in the tool's `index.tsx`. Slots are `dashboard` (gets `viewerId`) and `customer` (gets `viewerId`, `customerId`); `nav` adds a link to the shell navigation. The shell owns sign-in, layout and the approvals and audit pages.
+- **Shared UI.** Reuse `RecordTable` (list table), `HistoryTimeline` (a record's history) and `ApprovalButtons` (approve/deny controls) from `src/shell/components/`; `src/tools/refunds/` shows them together.
 - **Tests.** Colocate Vitest tests. Use `freshDb()` and the helpers in `src/foundation/testing.ts`, and assert pipeline outcomes and audit rows rather than poking the database.
 
 ## Run and test
