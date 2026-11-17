@@ -1,7 +1,7 @@
 import { createApprovalRequest } from "@/foundation/approvals/requests";
 import { appendAudit } from "@/foundation/audit/log";
 import { appendHistory, type ToolRecord } from "@/foundation/data/records";
-import { getDb } from "@/foundation/db";
+import { type Database, getDb } from "@/foundation/db";
 import { loadActor } from "@/foundation/permissions/grants";
 import { checkPermission } from "@/foundation/permissions/resolver";
 import { getActivePolicy } from "@/foundation/policy/active";
@@ -15,7 +15,21 @@ import type { ActionResult } from "./types";
  * (plus history entries on the record it targets).
  */
 export function runAction(actorId: string, actionId: string, rawInput: unknown): ActionResult {
-  const db = getDb();
+  return runActionOn(getDb(), actorId, actionId, rawInput);
+}
+
+/** Marks a call made by a seed step that acts as a user. */
+export interface SeedCall {
+  /** Prefixed to the audit and history reasons of the call. */
+  reasons: string[];
+}
+
+/**
+ * `runAction` on a given database. With `seed`, the call is checked exactly as
+ * the user's own call would be, and its audit row has outcome "seeded".
+ * Foundation only (seeds).
+ */
+export function runActionOn(db: Database, actorId: string, actionId: string, rawInput: unknown, seed?: SeedCall): ActionResult {
   const policy = getActivePolicy();
   const def = getAction(actionId);
 
@@ -56,6 +70,7 @@ export function runAction(actorId: string, actionId: string, rawInput: unknown):
   const decision = checkPermission(db, policy, { actorId, permission: def.permission, resource: built.resource });
 
   if (decision.effect === "deny") return deny(decision.reasons);
+  const auditReasons = [...(seed?.reasons ?? []), ...decision.reasons];
 
   if (decision.effect === "approval-required") {
     if (!policy.permissions[def.permission]?.approvalPermission) {
@@ -74,11 +89,11 @@ export function runAction(actorId: string, actionId: string, rawInput: unknown):
         actorId,
         actionId: def.id,
         tool: def.tool,
-        outcome: "approval-requested",
+        outcome: seed ? "seeded" : "approval-requested",
         customerId,
         approvalId: id,
         input,
-        reasons: decision.reasons,
+        reasons: auditReasons,
       });
       if (built.record) {
         appendHistory(db, {
@@ -88,7 +103,7 @@ export function runAction(actorId: string, actionId: string, rawInput: unknown):
           actionId: def.id,
           approvalId: id,
           auditId: audit,
-          reasons: decision.reasons,
+          reasons: auditReasons,
         });
       }
       return { approvalId: id, auditId: audit };
@@ -102,8 +117,8 @@ export function runAction(actorId: string, actionId: string, rawInput: unknown):
     input,
     built,
     approvalId: null,
-    outcome: "executed",
-    reasons: decision.reasons,
+    outcome: seed ? "seeded" : "executed",
+    reasons: auditReasons,
   });
   if (execution.status === "done") {
     return { outcome: "executed", auditId: execution.auditId, reasons: decision.reasons, result: execution.result };

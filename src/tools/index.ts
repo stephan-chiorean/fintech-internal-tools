@@ -2,3 +2,4 @@
 import "./test-harness";
 import "./kyc-review";
 import "./feature-flags";
+import "./refunds";
