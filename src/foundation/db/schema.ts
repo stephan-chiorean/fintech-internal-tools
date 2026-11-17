@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS customer_facts (
   namespace TEXT NOT NULL,
   key TEXT NOT NULL,
   value TEXT NOT NULL,
-  published_by TEXT NOT NULL REFERENCES users(id),
+  -- A user id, or "system" for facts published by a tool seed.
+  published_by TEXT NOT NULL,
   published_at TEXT NOT NULL,
   audit_action_id TEXT NOT NULL
 );
