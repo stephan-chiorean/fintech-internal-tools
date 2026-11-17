@@ -31,7 +31,12 @@ describe("permission resolver", () => {
     });
 
     it("gives payments on-call the payments engineering grants", () => {
-      expect(getEffectiveGrants("marcus").map((g) => g.id)).toEqual(["payments-oncall-approvers", "payments-eng-engineers"]);
+      expect(getEffectiveGrants("marcus").map((g) => g.id)).toEqual([
+        "payments-oncall-approvers",
+        "payments-oncall-flag-approvers",
+        "payments-eng-engineers",
+        "payments-eng-flag-engineers",
+      ]);
     });
 
     it("combines grants from every team a user belongs to", () => {
@@ -39,7 +44,7 @@ describe("permission resolver", () => {
     });
 
     it("does not give a parent team the grants of its children", () => {
-      expect(getEffectiveGrants("priya").map((g) => g.id)).toEqual(["payments-eng-engineers"]);
+      expect(getEffectiveGrants("priya").map((g) => g.id)).toEqual(["payments-eng-engineers", "payments-eng-flag-engineers"]);
     });
   });
 

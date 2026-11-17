@@ -24,6 +24,13 @@ export const policy = definePolicy({
       description: "Approve a test balance adjustment (test harness only)",
       isApproval: true,
     },
+    "feature-flags.read": { description: "See feature flags and their history" },
+    "feature-flags.create": { description: "Create a feature flag (granted to nobody; flags come from the tool's seed)" },
+    "feature-flags.toggle": {
+      description: "Turn a feature flag on or off, or roll it back to an earlier version",
+      approvalPermission: "feature-flags.toggle.approve",
+    },
+    "feature-flags.toggle.approve": { description: "Approve a feature flag change", isApproval: true },
     "test-harness.case.read": { description: "Read test cases and their history (test harness only)" },
     "test-harness.case.open": { description: "Open a test case (test harness only)" },
     "test-harness.case.update": {
@@ -124,6 +131,21 @@ export const policy = definePolicy({
         { permission: "customer.address.full" },
       ],
     },
+    "flag-engineer": {
+      description: "Change feature flags: staging directly, prod with approval",
+      permissions: [
+        { permission: "feature-flags.read" },
+        { permission: "feature-flags.toggle", when: { attr: "env", op: "eq", value: "staging" } },
+        { permission: "feature-flags.toggle", effect: "approval-required", when: { attr: "env", op: "eq", value: "prod" } },
+      ],
+    },
+    "flag-approver": {
+      description: "Approve prod feature flag changes",
+      permissions: [
+        { permission: "feature-flags.read" },
+        { permission: "feature-flags.toggle.approve", when: { attr: "env", op: "eq", value: "prod" } },
+      ],
+    },
     // Test-harness case roles. The policy grants none of them; tests add grants (see test-harness/records.test.ts).
     "test-harness-case-worker": {
       description: "Work test cases (test harness only)",
@@ -163,6 +185,8 @@ export const policy = definePolicy({
     { id: "support-t2-approvers", to: { team: "support-t2" }, role: "adjustment-approver", params: { maxAmountCents: 50_000 }, description: "Tier 2 leads approve adjustments up to $500" },
     { id: "payments-eng-engineers", to: { team: "payments-eng" }, role: "payments-engineer", scope: { productArea: "payments" }, description: "Payments engineers see payments customers" },
     { id: "payments-oncall-approvers", to: { team: "payments-oncall" }, role: "adjustment-approver", params: { maxAmountCents: 500_000 }, scope: { productArea: "payments" }, description: "On-call approves payments adjustments up to $5,000" },
+    { id: "payments-eng-flag-engineers", to: { team: "payments-eng" }, role: "flag-engineer", scope: { productArea: "payments" }, description: "Payments engineers change payments flags (prod needs approval)" },
+    { id: "payments-oncall-flag-approvers", to: { team: "payments-oncall" }, role: "flag-approver", scope: { productArea: "payments" }, description: "Payments on-call approves prod payments flag changes" },
     { id: "refunds-ops-specialists", to: { team: "refunds-ops" }, role: "refunds-specialist", description: "Refunds ops handles refunds" },
     { id: "kyc-review-reviewers", to: { team: "kyc-review" }, role: "kyc-reviewer", description: "KYC reviewers check identities" },
     { id: "compliance-auditors", to: { team: "compliance" }, role: "compliance-auditor", description: "Compliance audits all activity" },
