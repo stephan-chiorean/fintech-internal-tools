@@ -46,7 +46,7 @@ describe("permission resolver", () => {
     });
 
     it("combines grants from every team a user belongs to", () => {
-      expect(getEffectiveGrants("avery").map((g) => g.id).sort()).toEqual(["compliance-auditors", "kyc-review-reviewers"]);
+      expect(getEffectiveGrants("avery").map((g) => g.id).sort()).toEqual(["compliance-auditors", "kyc-escalation-deciders", "kyc-review-reviewers"]);
     });
 
     it("does not give a parent team the grants of its children", () => {

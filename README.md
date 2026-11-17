@@ -34,6 +34,7 @@ Switch users with the picker in the header (mock sign-in, no passwords).
 - **Approvals:** as Taylor (Tier 2, approves up to $500), approve Jordan's request on Approvals. Try approving your own request as Taylor, or approving as Alex: both are blocked by guardrails.
 - **Refunds:** as Chris (refunds ops, approves up to $2,500), the dashboard card lists refunds waiting for his approval: Taylor's seeded $2,500 refund. Jordan's seeded $4,200 refund on Dana's page is above his limit, and approving his own seeded refund on Grace Liu's page is blocked. As Jordan, request an $840 refund on Dana's page; as Chris, approve it. Each refund's history (request, every refused attempt, approval, issue) opens under it. As Alex (contractor), refunds are visible but can't be requested or approved.
 - **Audit:** as Morgan (compliance), open Audit log to see one row per action, approval decision and denial. The table can't be updated or deleted.
+- **KYC review:** as Riley, claim a case from the KYC review card on the dashboard, open it, then approve or reject it with a reason (the customer's KYC status changes and is published for other tools) or escalate it. Escalated cases are decided by Avery (compliance and KYC review). Riley can't decide a case someone else claimed, and nobody decides a case they opened. Jordan can't see the queue; Morgan sees a case customer's PII masked differently from Riley. Of the seeded pending cases, Jamie (fraud) opened Sam Okafor's, so she could never decide it.
 - **Feature flags:** as Priya, open Feature flags and turn off `payments.instant-payouts` in staging (applies at once), then turn it on in prod (creates an approval). The cards flag is hidden from her. As Marcus, approve it from the dashboard card; a prod change Marcus requests himself is blocked from his own approval. Each flag's history lists every change, request and refused attempt, with rollback buttons that follow the same rules.
 - **Explanations:** the dashboard lists each signed-in user's grants and where they come from (direct or inherited through the team tree).
 
@@ -47,7 +48,7 @@ Switch users with the picker in the header (mock sign-in, no passwords).
 | Action pipeline | Direct writes and Power Automate flows set up per app | Built |
 | Approvals | Power Automate approval flows | Built |
 | Audit log | Per-app or table-level auditing | Built |
-| Tool modules (`src/tools/`) | Individual canvas or model-driven apps | Feature flags and refunds built; KYC queue next |
+| Tool modules (`src/tools/`) | Individual canvas or model-driven apps | KYC review, feature flags and refunds built |
 
 ## How the foundation works
 
@@ -91,6 +92,7 @@ How a tool plugs in is documented in `AGENTS.md` ("Building a tool"). ESLint blo
 ## Results
 
 - Foundation and shell: `npm test`, `npm run typecheck` and `npm run lint` pass. Tests cover team inheritance, all-teams grants, scope, conditions (including on the acting user), guardrails, decision explanations and failed limits, masking, cross-tool facts, tool records (trusted attributes can't be set from input, history and request lifecycle, reads scoped by kind and status), seeds, KYC status updates, approval recheck and single use, audit and history immutability, and end-to-end checks that call the shell's server actions directly.
+- KYC review: tests cover claim and approve, escalate and decide, the opener guardrail, queue access, PII masking per viewer, complete case history, and five server-side security checks (unauthorized calls, access lost after claiming, no deciding a case you opened, no raw PII in responses, one audit row per call).
 - Feature flags (`src/tools/feature-flags/`): tests cover staging toggles applying at once, prod toggles and rollbacks waiting for payments on-call approval, no self-approval, product-area scope (Priya can't touch cards flags), complete history, and the five end-to-end security checks through the shell's server actions.
 - Refunds: tests cover Chris approving $840, Chris denied on $4,200 with the $2,500 limit named, exactly $2,500 allowed, Chris blocked on his own refund, Alex never approving (even with an approver grant), complete history linked to audit rows, rejection and resubmission, opener-only submission, no double issue, published facts, the seeds, the dashboard card and customer view, and five end-to-end security checks through the shell's server actions (unauthorized calls write nothing, approver losing permission, self-approval, no unmasked fields in responses or rendered refunds, exactly one audit row per mutation).
 
