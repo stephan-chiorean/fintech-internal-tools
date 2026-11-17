@@ -13,6 +13,8 @@ export function defineAction<I, R extends JsonValue | void>(def: ActionDefinitio
   if (!getActivePolicy().permissions[def.permission]) {
     throw new Error(`Action ${def.id} uses permission ${def.permission}, which is not in the policy config`);
   }
+  const targets = [def.customerId, def.record, def.newRecord].filter(Boolean).length;
+  if (targets > 1) throw new Error(`Action ${def.id} may declare only one of customerId, record and newRecord`);
   actions.set(def.id, def as RegisteredAction);
   return def;
 }

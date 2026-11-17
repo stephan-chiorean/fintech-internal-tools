@@ -10,7 +10,9 @@ export interface Actor {
 export type GrantSource =
   | { type: "user" }
   /** `teamId` holds the grant; the actor is a member of `memberOf`, `depth` levels below it. */
-  | { type: "team"; teamId: string; teamName: string; memberOf: string; memberOfName: string; depth: number };
+  | { type: "team"; teamId: string; teamName: string; memberOf: string; memberOfName: string; depth: number }
+  /** The grant requires membership in every one of `teams`, and the actor has it. */
+  | { type: "all-teams"; teams: { id: string; name: string }[] };
 
 export interface EffectiveGrant {
   id: string;
@@ -58,6 +60,27 @@ WHERE g.subject_type = 'user' AND g.subject_id = @actorId
 ORDER BY depth, id
 `;
 
+// Every team the user belongs to, directly or through a child team.
+const MEMBERSHIP_SQL = `
+WITH RECURSIVE membership(team_id, depth) AS (
+  SELECT team_id, 0 FROM user_teams WHERE user_id = @actorId
+  UNION
+  SELECT t.parent_id, m.depth + 1
+  FROM membership m JOIN teams t ON t.id = m.team_id
+  WHERE t.parent_id IS NOT NULL AND m.depth < 32
+)
+SELECT DISTINCT team_id FROM membership
+`;
+
+const ALL_TEAMS_GRANTS_SQL = `
+SELECT g.*, gt.team_id, t.name AS team_name
+FROM grants g
+JOIN grant_teams gt ON gt.grant_id = g.id
+JOIN teams t ON t.id = gt.team_id
+WHERE g.subject_type = 'all-teams'
+ORDER BY g.id, gt.team_id
+`;
+
 export function loadActor(db: Database, actorId: string): Actor | null {
   const row = db.prepare("SELECT id, name, is_contractor FROM users WHERE id = ?").get(actorId) as
     | { id: string; name: string; is_contractor: number }
@@ -81,11 +104,7 @@ export function loadEffectiveGrants(db: Database, actorId: string): EffectiveGra
       id: row.id,
       role: row.role,
       params: JSON.parse(row.params),
-      scope: row.scope_product_area
-        ? { productArea: row.scope_product_area }
-        : row.scope_customer_id
-          ? { customerId: row.scope_customer_id }
-          : null,
+      scope: grantScope(row),
       description: row.description,
       source:
         row.subject_type === "user"
@@ -100,11 +119,40 @@ export function loadEffectiveGrants(db: Database, actorId: string): EffectiveGra
             },
     });
   }
-  return grants;
+  return [...grants, ...loadAllTeamsGrants(db, actorId)];
+}
+
+function grantScope(row: Pick<GrantRow, "scope_product_area" | "scope_customer_id">): EffectiveGrant["scope"] {
+  if (row.scope_product_area) return { productArea: row.scope_product_area };
+  if (row.scope_customer_id) return { customerId: row.scope_customer_id };
+  return null;
+}
+
+/** Grants that require membership in several teams at once, kept only if the actor is in all of them. */
+function loadAllTeamsGrants(db: Database, actorId: string): EffectiveGrant[] {
+  const memberOf = new Set((db.prepare(MEMBERSHIP_SQL).all({ actorId }) as { team_id: string }[]).map((r) => r.team_id));
+  const rows = db.prepare(ALL_TEAMS_GRANTS_SQL).all() as (GrantRow & { team_id: string; team_name: string })[];
+  const byGrant = new Map<string, { row: GrantRow; teams: { id: string; name: string }[] }>();
+  for (const row of rows) {
+    const entry = byGrant.get(row.id) ?? { row, teams: [] };
+    entry.teams.push({ id: row.team_id, name: row.team_name });
+    byGrant.set(row.id, entry);
+  }
+  return [...byGrant.values()]
+    .filter(({ teams }) => teams.every((t) => memberOf.has(t.id)))
+    .map(({ row, teams }) => ({
+      id: row.id,
+      role: row.role,
+      params: JSON.parse(row.params),
+      scope: grantScope(row),
+      description: row.description,
+      source: { type: "all-teams", teams },
+    }));
 }
 
 export function describeSource(source: GrantSource): string {
   if (source.type === "user") return "granted to the user directly";
+  if (source.type === "all-teams") return `granted to members of all of ${source.teams.map((t) => t.name).join(" and ")}`;
   if (source.depth === 0) return `granted to team ${source.teamName}`;
   return `granted to team ${source.teamName}, inherited through membership in ${source.memberOfName}`;
 }

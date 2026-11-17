@@ -1,6 +1,14 @@
 import type { Database } from "better-sqlite3";
 
-export type AuditOutcome = "executed" | "approval-requested" | "approved" | "rejected" | "denied" | "failed";
+export type AuditOutcome =
+  | "executed"
+  | "approval-requested"
+  | "approved"
+  | "rejected"
+  | "denied"
+  | "failed"
+  /** A tool's system seed, run once per database without permission checks. */
+  | "seeded";
 
 export interface AuditInput {
   actorId: string;

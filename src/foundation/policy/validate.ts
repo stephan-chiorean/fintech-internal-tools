@@ -12,6 +12,7 @@ export function validatePolicy(policy: Policy): void {
   const permissionNames = new Set(Object.keys(policy.permissions));
 
   for (const [name, def] of Object.entries(policy.permissions)) {
+    if (def.isApproval && def.isDecision) errors.push(`Permission ${name}: cannot be both an approval and a decision permission`);
     if (def.approvalPermission && !policy.permissions[def.approvalPermission]?.isApproval) {
       errors.push(`Permission ${name}: approvalPermission ${def.approvalPermission} must be an approval permission`);
     }
@@ -32,6 +33,9 @@ export function validatePolicy(policy: Policy): void {
   for (const grant of policy.grants) {
     if (grantIds.has(grant.id)) errors.push(`Grant ${grant.id}: duplicate id`);
     grantIds.add(grant.id);
+    if ("allTeams" in grant.to && new Set(grant.to.allTeams).size < 2) {
+      errors.push(`Grant ${grant.id}: allTeams needs at least two different teams`);
+    }
     const role = policy.roles[grant.role];
     if (!role) {
       errors.push(`Grant ${grant.id}: unknown role ${grant.role}`);

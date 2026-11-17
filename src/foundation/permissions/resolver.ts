@@ -53,7 +53,17 @@ function guardrailViolation(guardrail: Guardrail, actor: Actor, resource: Resour
     if (typeof requestedBy !== "string") return "the request has no requester, so self-approval cannot be ruled out";
     return requestedBy === actor.id ? `${actor.name} made this request` : null;
   }
+  if (rule.kind === "actor-matches-attribute") {
+    const set = rule.attributes.filter((name) => typeof resource.attrs[name] === "string" && resource.attrs[name] !== "");
+    if (set.length === 0) return `the resource names no ${rule.attributes.join(" or ")}, so it cannot be ruled out`;
+    const match = set.find((name) => resource.attrs[name] === actor.id);
+    return match ? `${actor.name} is this record's ${match}` : null;
+  }
   return actor[rule.attribute] === rule.equals ? `${actor.name} is a contractor` : null;
+}
+
+function guardrailApplies(guardrail: Guardrail, permission: { isApproval?: boolean; isDecision?: boolean }): boolean {
+  return guardrail.appliesTo === "approval-permissions" ? !!permission.isApproval : !!permission.isDecision;
 }
 
 function grantLabel(grant: EffectiveGrant): string {
@@ -82,6 +92,7 @@ export function checkPermission(db: Database, policy: Policy, input: CheckInput)
 
   const matched: MatchedGrant[] = [];
   const notes: string[] = [];
+  const failedLimits: string[] = [];
   for (const grant of loadEffectiveGrants(db, actorId)) {
     const entries = policy.roles[grant.role]?.permissions.filter((p) => p.permission === permission) ?? [];
     if (entries.length === 0) continue;
@@ -92,9 +103,10 @@ export function checkPermission(db: Database, policy: Policy, input: CheckInput)
     }
     for (const entry of entries) {
       const effect = entry.effect ?? "allow";
-      const condition = entry.when ? evaluateCondition(entry.when, resource.attrs, grant.params) : null;
+      const condition = entry.when ? evaluateCondition(entry.when, resource.attrs, grant.params, actorId) : null;
       if (condition && !condition.passed) {
         notes.push(`Not applied: ${grantLabel(grant)} gives ${permission} (${effect}) only when ${condition.explanation}.`);
+        for (const failure of condition.failures) failedLimits.push(`${failure} (grant "${grant.id}")`);
         continue;
       }
       matched.push({ grantId: grant.id, role: grant.role, effect, source: describeSource(grant.source) });
@@ -104,18 +116,17 @@ export function checkPermission(db: Database, policy: Policy, input: CheckInput)
     }
   }
 
-  if (permissionDef.isApproval) {
-    for (const guardrail of policy.guardrails) {
-      const violation = guardrailViolation(guardrail, actor, resource);
-      if (violation) {
-        return deny(
-          [
-            `Denied by guardrail "${guardrail.id}": ${guardrail.description} (${violation}). Guardrails override all grants.`,
-            ...notes,
-          ],
-          { guardrail: guardrail.id, matchedGrants: matched },
-        );
-      }
+  for (const guardrail of policy.guardrails) {
+    if (!guardrailApplies(guardrail, permissionDef)) continue;
+    const violation = guardrailViolation(guardrail, actor, resource);
+    if (violation) {
+      return deny(
+        [
+          `Denied by guardrail "${guardrail.id}": ${guardrail.description} (${violation}). Guardrails override all grants.`,
+          ...notes,
+        ],
+        { guardrail: guardrail.id, matchedGrants: matched },
+      );
     }
   }
 
@@ -129,6 +140,8 @@ export function checkPermission(db: Database, policy: Policy, input: CheckInput)
       ? `Allowed: ${actor.name} has ${permission}.`
       : effect === "approval-required"
         ? `Approval required: ${actor.name} can request ${permission}, but it needs approval${permissionDef.approvalPermission ? ` by someone with ${permissionDef.approvalPermission}` : ""}.`
-        : `Denied: no grant gives ${actor.name} ${permission} here.`;
+        : `Denied: no grant gives ${actor.name} ${permission} here.${
+            failedLimits.length > 0 ? ` Failed limit: ${[...new Set(failedLimits)].join("; ")}.` : ""
+          }`;
   return { effect, actorId, permission, reasons: [headline, ...notes], matchedGrants: matched };
 }

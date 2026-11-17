@@ -6,7 +6,7 @@ A prototype that rebuilds a fintech client's Microsoft Power Apps internal tools
 
 The client runs three internal tools on Power Apps (a KYC review queue, a refunds dashboard and a feature-flag admin panel) and plans 10+ more. This repo shows they can all run as modules in one application, sharing permissions, customer data, an action pipeline, approvals, audit and a common shell.
 
-**Status:** the shared foundation and shell are built. No real tools yet; a test-only harness tool exercises the pipeline. The database is created and seeded with fake data at `.data/app.db` on first run (delete it to reset).
+**Status:** the shared foundation and shell are built, including tool-owned records with history, seeds and decision guardrails for the planned tools. No real tools yet; a test-only harness tool exercises the pipeline. The database is created and seeded with fake data at `.data/app.db` on first run (delete it to reset). A database from an older schema version is moved aside automatically and recreated.
 
 ## How to run it
 
@@ -51,12 +51,12 @@ Switch users with the picker in the header (mock sign-in, no passwords).
 
 | Part | Where | What it does |
 | --- | --- | --- |
-| Database | `src/foundation/db/` | SQLite schema and seed: team tree, users, customers, grants, customer facts, approvals, audit. Triggers abort any `UPDATE` or `DELETE` on `audit`. |
-| Policy | `src/foundation/policy/policy.config.ts` | The single place for permissions: roles (with parameters such as "approve up to $X"), grants to users or teams (optionally scoped to a product area or one customer), conditions on resource data, field masking (`full`/`last4`/`hidden`) and guardrails. Validated at startup. |
-| Permissions | `src/foundation/permissions/` | Resolves direct grants plus grants inherited from ancestor teams (recursive CTE), applies scope, conditions and guardrails, and returns allow / approval-required / deny with human-readable reasons. |
-| Shared data | `src/foundation/data/` | Customer profiles with each sensitive field masked for the viewer; customer facts that tools publish and read across tools with the same checks. |
-| Pipeline | `src/foundation/pipeline/` | `runAction` is the only write path: execute, request approval or deny, with exactly one audit row per call. Action writes and their audit row commit in one transaction. |
-| Approvals | `src/foundation/approvals/` | Single-use. At decision time the approver's permission (and the requester's) is checked again against current policy, data and team membership. |
+| Database | `src/foundation/db/` | SQLite schema and seed: team tree, users, customers, grants, customer facts, tool records and their history, approvals, audit, seed runs. Triggers abort any `UPDATE` or `DELETE` on `audit` and `record_history`. A `user_version` schema version moves stale files aside. |
+| Policy | `src/foundation/policy/policy.config.ts` | The single place for permissions: roles (with parameters such as "approve up to $X"), grants to users, teams or members of all of several teams (optionally scoped to a product area or one customer), conditions on resource data and on the acting user, field masking (`full`/`last4`/`hidden`) and guardrails (no self-approval, contractors never approve, nobody decides a record they opened). Validated at startup. |
+| Permissions | `src/foundation/permissions/` | Resolves direct grants plus grants inherited from ancestor teams (recursive CTE), applies scope, conditions and guardrails, and returns allow / approval-required / deny with human-readable reasons; denials name the failed limit. |
+| Shared data | `src/foundation/data/` | Customer profiles with each sensitive field masked for the viewer; customer facts and tool records (with history) that tools read across tools with the same checks. |
+| Pipeline | `src/foundation/pipeline/` | `runAction` is the only write path: execute, request approval or deny, with exactly one audit row per call. Action writes, record history and their audit row commit in one transaction. Record attributes used by checks come from storage, never from input. Tool seeds run once per database through the same path. |
+| Approvals | `src/foundation/approvals/` | Single-use. At decision time the approver's permission (and the requester's) is checked again against current policy, data and team membership. Every attempt is recorded in the target record's history. |
 | Shell | `src/shell/` | Mock user switcher, navigation, dashboard, customers, approvals and audit pages, and `dashboard`/`customer` slots tools register into. |
 
 How a tool plugs in is documented in `AGENTS.md` ("Building a tool"). ESLint blocks tools from importing the database or permission internals.
@@ -75,11 +75,12 @@ How a tool plugs in is documented in `AGENTS.md` ("Building a tool"). ESLint blo
 - **Policy in code, materialized into SQLite.** `policy.config.ts` is typed and reviewed like code; grants are synced into the `grants` table so the resolver can join them with the team tree in one query. The tradeoff is that changing access needs a deploy.
 - **Synchronous `better-sqlite3`.** Actions run inside one transaction with their audit row, so a failed action leaves only a `failed` audit entry. Action `execute` functions must be synchronous.
 - **Approvals execute as the requester.** The approved action runs with the requester's identity and the audit row records the approver, so both are rechecked and attributable.
+- **Generic tool records instead of tables per tool.** Tools never touch the database, so the foundation stores their records, attributes and history. Attributes that permission checks read must be declared, which keeps them trusted, but it means a tool can't add its own indexes or columns.
 - **System fonts instead of `next/font/google`.** That way the app doesn't download fonts at build or dev time.
 
 ## Results
 
-- Foundation and shell: `npm test`, `npm run typecheck` and `npm run lint` pass. Tests cover team inheritance, scope, conditions, guardrails, decision explanations, masking, cross-tool facts, approval recheck and single use, audit immutability, and end-to-end checks that call the shell's server actions directly.
+- Foundation and shell: `npm test`, `npm run typecheck` and `npm run lint` pass. Tests cover team inheritance, all-teams grants, scope, conditions (including on the acting user), guardrails, decision explanations and failed limits, masking, cross-tool facts, tool records (trusted attributes can't be set from input, history and request lifecycle, reads scoped by kind and status), seeds, KYC status updates, approval recheck and single use, audit and history immutability, and end-to-end checks that call the shell's server actions directly.
 - No real tools built yet.
 
 ## What's mocked and what production would need

@@ -41,6 +41,14 @@ const RAW_FIELD: Record<MaskedField, "ssn" | "bank_account" | "dob" | "address">
   address: "address",
 };
 
+export const KYC_STATUSES = ["pending", "verified", "rejected"] as const;
+export type KycStatus = (typeof KYC_STATUSES)[number];
+
+/** Sets a customer's KYC status. Only the action pipeline calls this, inside its transaction. */
+export function updateKycStatus(db: Database, customerId: string, status: KycStatus): void {
+  db.prepare("UPDATE customers SET kyc_status = ? WHERE id = ?").run(status, customerId);
+}
+
 export const MASKED_FIELDS = Object.keys(RAW_FIELD) as MaskedField[];
 
 export function loadCustomer(db: Database, customerId: string): CustomerRow | null {
