@@ -6,5 +6,8 @@ export default defineConfig({
   },
   test: {
     include: ["src/**/*.test.{ts,tsx}"],
+    env: {
+      DATABASE_PATH: ":memory:",
+    },
   },
 });
