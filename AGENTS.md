@@ -49,6 +49,8 @@ npm run lint       # ESLint
 
 - Every PR passes `npm test`, `npm run typecheck` and `npm run lint`. CI (`.github/workflows/ci.yml`) runs all three on every PR.
 - Every PR updates the README sections it affects.
+- Use Devin's built-in git tools for PR reads and checks, not `gh`.
+- Every PR description lists decisions and alternatives, what was reused vs added, and anything corrected.
 - Keep this file short and extend it as the repo grows.
 
 <!-- BEGIN:nextjs-agent-rules -->
