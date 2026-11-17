@@ -182,6 +182,7 @@ function makeContext(
   built: ResolvedResource,
   target: { record: ToolRecord | null },
   history: PendingHistory[],
+  isSeed: boolean,
 ): ActionContext {
   return {
     actor,
@@ -206,12 +207,14 @@ function makeContext(
     setCustomerKycStatus: (status: KycStatus) => {
       if (!built.customerId) throw new Error(`${def.id} has no customer to update`);
       if (!KYC_STATUSES.includes(status)) throw new Error(`unknown KYC status "${status}"`);
-      const decision = checkPermission(db, policy, {
-        actorId: actor.id,
-        permission: "customer.kycStatus.update",
-        resource: built.resource,
-      });
-      if (decision.effect !== "allow") throw new PipelineDenial(decision.reasons[0]);
+      if (!isSeed) {
+        const decision = checkPermission(db, policy, {
+          actorId: actor.id,
+          permission: "customer.kycStatus.update",
+          resource: built.resource,
+        });
+        if (decision.effect !== "allow") throw new PipelineDenial(decision.reasons[0]);
+      }
       updateKycStatus(db, built.customerId, status);
     },
   };
@@ -267,7 +270,7 @@ export function executeWithAudit(
         history.push({ event: "created", record: target.record, reasons });
       }
       if (args.historyEvent && target.record) history.push({ event: args.historyEvent, record: target.record, reasons });
-      const result = def.execute(makeContext(db, policy, def, actor, approvalId, built, target, history), input);
+      const result = def.execute(makeContext(db, policy, def, actor, approvalId, built, target, history, outcome === "seeded"), input);
       const auditId = appendAudit(db, { ...audit, outcome, reasons, result });
       writeHistory(history, auditId);
       return { status: "done", auditId, result };
