@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "better-sqlite3";
-import { decideApproval } from "@/foundation/approvals";
+import { decideApproval, listApprovals } from "@/foundation/approvals";
+import { listAuditEntries } from "@/foundation/audit";
 import { getCustomerFacts, getRecordHistory, getToolRecord, listToolRecords } from "@/foundation/data";
 import { runAction } from "@/foundation/pipeline";
 import { freshDb, withExtraGrants } from "@/foundation/testing";
@@ -22,6 +23,11 @@ const pendingApproval = (key: string) => {
   if (!history.ok) throw new Error(history.decision.reasons[0]);
   return history.entries.findLast((e) => e.event === "approval-requested")!.approvalId!;
 };
+const refundAudit = () => {
+  const audit = listAuditEntries("morgan", { limit: 1_000 });
+  if (!audit.ok) throw new Error(audit.decision.reasons[0]);
+  return audit.entries.filter((e) => e.tool === "refunds");
+};
 const status = (key: string) => {
   const read = getToolRecord("chris", "refunds", refundRef(key));
   if (!read.ok) throw new Error(read.decision.reasons[0]);
@@ -35,14 +41,13 @@ describe("refunds", () => {
   });
 
   it("seeds three pending refunds requested by Jordan ($4,200), Chris and Taylor ($2,500)", () => {
-    const pending = db
-      .prepare("SELECT requested_by, status FROM approvals WHERE tool = 'refunds' ORDER BY requested_at")
-      .all();
-    expect(pending).toEqual([
-      { requested_by: "jordan", status: "pending" },
-      { requested_by: "chris", status: "pending" },
-      { requested_by: "taylor", status: "pending" },
-    ]);
+    const requests = (user: string) =>
+      listApprovals(user, { tool: "refunds" })
+        .filter((a) => a.requestedBy === user)
+        .map((a) => [a.record?.key, a.status]);
+    expect(requests("jordan")).toEqual([[SEEDED.jordan4200, "pending"]]);
+    expect(requests("chris")).toEqual([[SEEDED.chris, "pending"]]);
+    expect(requests("taylor")).toEqual([[SEEDED.taylor2500, "pending"]]);
     const amounts = Object.fromEntries(
       listToolRecords("chris", "refunds").records.map((r) => [r.key, [r.openedBy, r.attrs.amountCents, r.attrs.status]]),
     );
@@ -51,8 +56,7 @@ describe("refunds", () => {
       [SEEDED.chris]: ["chris", 125_000, "requested"],
       [SEEDED.taylor2500]: ["taylor", 250_000, "requested"],
     });
-    const audit = db.prepare("SELECT DISTINCT outcome FROM audit WHERE tool = 'refunds'").all();
-    expect(audit).toEqual([{ outcome: "seeded" }]);
+    expect(new Set(refundAudit().map((e) => e.outcome))).toEqual(new Set(["seeded"]));
   });
 
   it("Chris approves an $840 refund and it is issued", () => {
@@ -73,7 +77,8 @@ describe("refunds", () => {
     expect(decision.reasons[0]).toContain("amountCents 420000 ≤ maxAmountCents (250000)");
     expect(decision.reasons[0]).toContain('grant "refunds-ops-refund-approvers"');
     expect(status(SEEDED.jordan4200)).toBe("requested");
-    expect(db.prepare("SELECT status FROM approvals WHERE id = ?").get(pendingApproval(SEEDED.jordan4200))).toEqual({ status: "pending" });
+    const approval = listApprovals("jordan", { tool: "refunds" }).find((a) => a.id === pendingApproval(SEEDED.jordan4200));
+    expect(approval?.status).toBe("pending");
   });
 
   it("allows Chris on exactly $2,500", () => {
@@ -130,19 +135,18 @@ describe("refunds", () => {
     expect(history.entries[1].auditId).toBe(issued!.auditId);
     expect(history.entries[5].auditId).toBe(approved.auditId);
     expect(history.entries.at(-1)!.attrs).toMatchObject({ status: "issued", amountCents: 84_000 });
-    for (const entry of history.entries) {
-      expect(db.prepare("SELECT action_id FROM audit WHERE id = ?").get(entry.auditId)).toBeTruthy();
-    }
+    const auditIds = new Set(refundAudit().map((e) => e.id));
+    for (const entry of history.entries) expect(auditIds).toContain(entry.auditId);
     expect(history.entries.at(-1)!.reasons.join(" ")).toContain("Denied");
   });
 
   it("records a rejection and lets the requester resubmit", () => {
     const { issued } = requestRefund("jordan", "rf_reject", 84_000);
     expect(decideApproval("chris", issued!.approvalId!, "reject").outcome).toBe("rejected");
-    expect(customerRefunds("jordan", "cust_1001").refunds.find((r) => r.key === "rf_reject")!.state).toBe("rejected");
+    expect(customerRefunds("jordan", "cust_1001").find((r) => r.key === "rf_reject")!.state).toBe("rejected");
     expect(runAction("taylor", "refunds.issue", { key: "rf_reject" }).outcome).toBe("denied");
     expect(runAction("jordan", "refunds.issue", { key: "rf_reject" }).outcome).toBe("approval-requested");
-    expect(customerRefunds("jordan", "cust_1001").refunds.find((r) => r.key === "rf_reject")!.state).toBe("pending-approval");
+    expect(customerRefunds("jordan", "cust_1001").find((r) => r.key === "rf_reject")!.state).toBe("pending-approval");
   });
 
   it("lets Tier 1, Tier 2 and refunds ops request, but only the opener can submit a refund for approval", () => {
@@ -163,7 +167,8 @@ describe("refunds", () => {
     const again = decideApproval("chris", second.approvalId!, "approve");
     expect(again.outcome).toBe("denied");
     expect(again.reasons[0]).toContain("status issued = requested");
-    expect(db.prepare("SELECT COUNT(*) AS n FROM customer_facts WHERE key = 'refund.issued'").get()).toEqual({ n: 1 });
+    const issuedFacts = getCustomerFacts("riley", "cust_1001", { namespace: "refunds" }).facts.filter((f) => f.key === "refund.issued");
+    expect(issuedFacts).toHaveLength(1);
   });
 
   it("publishes each customer's refund history as facts other tools read through the foundation", () => {
@@ -189,8 +194,7 @@ describe("refunds", () => {
   });
 
   it("shows a customer's refunds only to users who may view them", () => {
-    expect(customerRefunds("alex", "cust_1001").refunds.map((r) => [r.key, r.state])).toEqual([[SEEDED.jordan4200, "pending-approval"]]);
-    expect(customerRefunds("priya", "cust_1001").refunds).toEqual([]);
-    expect(customerRefunds("priya", "cust_1001").withheld).toBe(3);
+    expect(customerRefunds("alex", "cust_1001").map((r) => [r.key, r.state])).toEqual([[SEEDED.jordan4200, "pending-approval"]]);
+    expect(customerRefunds("priya", "cust_1001")).toEqual([]);
   });
 });
