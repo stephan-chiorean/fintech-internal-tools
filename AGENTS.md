@@ -19,7 +19,7 @@ Prototype for a fintech client that runs its internal tools on Microsoft Power A
 
 ## Run and test
 
-Requires Node.js 20.9+ (`.nvmrc` pins 24).
+Requires Node.js 20.19+, 22.12+ or 24+ (`.nvmrc` pins 24).
 
 ```bash
 npm install

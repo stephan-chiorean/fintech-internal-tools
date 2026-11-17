@@ -10,7 +10,7 @@ The client runs three internal tools on Power Apps (a KYC review queue, a refund
 
 ## How to run it
 
-Requires Node.js 20.9+ (`.nvmrc` pins 24). No Docker, no external services.
+Requires Node.js 20.19+, 22.12+ or 24+ (`.nvmrc` pins 24). No Docker, no external services.
 
 ```bash
 npm install && npm run dev   # http://localhost:3000
