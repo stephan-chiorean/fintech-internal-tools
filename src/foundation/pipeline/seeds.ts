@@ -4,11 +4,19 @@ import type { Actor } from "@/foundation/permissions";
 import { getActivePolicy } from "@/foundation/policy/active";
 import { buildResource, errorMessage, executeWithAudit } from "./execute";
 import { getAction } from "./registry";
+import { runActionOn } from "./run-action";
 
 /** One action call a seed makes. */
 export interface SeedStep {
   actionId: string;
   input: unknown;
+  /**
+   * The user the step acts as. The step then runs through that user's
+   * permission checks, so it can execute or request approval like their own
+   * call; it is denied (and the seed fails) if they couldn't make it.
+   * Without it, the step runs as the system actor without permission checks.
+   */
+  as?: string;
 }
 
 /** Starting data for a tool, created by running the tool's own actions. */
@@ -27,9 +35,11 @@ const globalForSeeds = globalThis as unknown as { __fitSeeds?: Map<string, SeedD
 const seeds = (globalForSeeds.__fitSeeds ??= new Map());
 
 /**
- * Runs a seed once per database, all steps in one transaction. Each step goes
- * through the action's parse, resource checks and execute, and writes one audit
- * row with outcome "seeded" by the system actor. Permission checks are skipped.
+ * Runs a seed once per database, all steps in one transaction. Each step writes
+ * one audit row with outcome "seeded". A step without `as` goes through the
+ * action's parse, resource checks and execute as the system actor, skipping
+ * permission checks. A step with `as` runs through the pipeline as that user,
+ * with their permission checks.
  */
 function runSeed(db: Database, seed: SeedDefinition): void {
   if (db.prepare("SELECT 1 FROM seed_runs WHERE id = ?").get(seed.id)) return;
@@ -40,6 +50,15 @@ function runSeed(db: Database, seed: SeedDefinition): void {
       for (const step of seed.steps) {
         const def = getAction(step.actionId);
         if (!def || def.tool !== seed.tool) throw new Error(`action ${step.actionId} is not an action of ${seed.tool}`);
+        if (step.as !== undefined) {
+          const result = runActionOn(db, step.as, step.actionId, step.input, {
+            reasons: [`Seed "${seed.id}" acting as ${step.as}: ${seed.description}. Runs once per database, with ${step.as}'s permission checks.`],
+          });
+          if (result.outcome !== "executed" && result.outcome !== "approval-requested") {
+            throw new Error(`${step.actionId} as ${step.as}: ${result.error ?? result.reasons[0]}`);
+          }
+          continue;
+        }
         const input = def.parse(step.input);
         const built = buildResource(db, def, input, {}, SYSTEM_ACTOR.id);
         if (!built.ok) throw new Error(built.reason);
@@ -51,6 +70,7 @@ function runSeed(db: Database, seed: SeedDefinition): void {
           approvalId: null,
           outcome: "seeded",
           reasons,
+          systemSeed: true,
         });
         if (execution.status !== "done") throw new Error(`${step.actionId}: ${execution.error}`);
       }

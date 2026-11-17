@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { decideApproval, listApprovals } from "@/foundation/approvals";
 import { openDatabase } from "@/foundation/db";
 import { auditCount, freshDb } from "@/foundation/testing";
 import "@/tools/test-harness/action";
@@ -56,5 +57,50 @@ describe("tool seeds", () => {
     expect(last.outcome).toBe("failed");
     expect(last.reasons).toContain("already exists");
     expect(db.prepare("SELECT id FROM seed_runs").all()).toEqual([{ id: "test-harness.demo-case" }]);
+  });
+
+  it("runs a step as a named user through that user's permission checks, audited as a seed", () => {
+    const db = freshDb();
+    defineSeed({
+      id: "test-harness.as-users",
+      tool: "test-harness",
+      description: "Requests made by real users",
+      steps: [
+        { actionId: "test-harness.adjust", input: { customerId: "cust_1001", amountCents: 5_000, note: "small" }, as: "jordan" },
+        { actionId: "test-harness.adjust", input: { customerId: "cust_1001", amountCents: 40_000, note: "large" }, as: "jordan" },
+      ],
+    });
+    const rows = db
+      .prepare("SELECT actor_id, outcome, approval_id, reasons FROM audit WHERE input LIKE '%cust_1001%' AND actor_id = 'jordan'")
+      .all() as { actor_id: string; outcome: string; approval_id: string | null; reasons: string }[];
+    expect(rows.map((r) => [r.outcome, r.approval_id !== null])).toEqual([
+      ["seeded", false],
+      ["seeded", true],
+    ]);
+    expect(rows.every((r) => r.reasons.includes('Seed \\"test-harness.as-users\\" acting as jordan'))).toBe(true);
+    expect(db.prepare("SELECT published_by FROM customer_facts WHERE published_by = 'jordan'").all()).toHaveLength(1);
+
+    const [pending] = listApprovals("taylor", { tool: "test-harness", canDecide: true });
+    expect(pending).toMatchObject({ requestedBy: "jordan", summary: expect.stringContaining("$400.00") });
+    expect(decideApproval("jordan", pending.id, "approve").outcome).toBe("denied");
+    expect(decideApproval("taylor", pending.id, "approve").outcome).toBe("approved");
+  });
+
+  it("fails and rolls back a step the named user isn't allowed to make", () => {
+    const db = freshDb();
+    defineSeed({
+      id: "test-harness.as-contractor",
+      tool: "test-harness",
+      description: "A contractor adjustment",
+      steps: [
+        { actionId: "test-harness.open-case", input: { key: "as-alex", productArea: "payments", env: "staging", amountCents: 1 }, as: "alex" },
+      ],
+    });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM tool_records WHERE key = 'as-alex'").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM audit WHERE actor_id = 'alex'").get()).toEqual({ n: 0 });
+    const last = db.prepare("SELECT actor_id, outcome, reasons FROM audit ORDER BY id DESC LIMIT 1").get() as { actor_id: string; outcome: string; reasons: string };
+    expect(last).toMatchObject({ actor_id: "system", outcome: "failed" });
+    expect(last.reasons).toContain("as alex");
+    expect(db.prepare("SELECT id FROM seed_runs WHERE id = 'test-harness.as-contractor'").all()).toEqual([]);
   });
 });
