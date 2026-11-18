@@ -58,7 +58,7 @@ export function CustomerPage({ viewerId, customerId }: { viewerId: string; custo
                 <strong>
                   {fact.namespace}/{fact.key}
                 </strong>
-                : <code>{JSON.stringify(fact.value)}</code>
+                : <code className={styles.factValue}>{JSON.stringify(fact.value)}</code>
                 <div className={styles.muted}>
                   by {fact.publishedBy} at {new Date(fact.publishedAt).toLocaleString()}
                 </div>
